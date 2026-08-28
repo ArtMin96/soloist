@@ -50,24 +50,21 @@ pub trait WatchScanner: Send + Sync {
     fn scan(&self, request: ScanRequest) -> Scan;
 }
 
-/// A [`WatchScanner`] that reports the root alone — the default until the real adapter is wired.
-/// A build without it watches each project's root and repository state and nothing deeper, which
-/// is the degraded mode this subsystem already has a name for, not a failure.
+/// A [`WatchScanner`] that reports the root unconditionally, without touching the filesystem —
+/// core holds no OS-facing code, so it cannot check whether the root exists; that is the real
+/// adapter's job. The default until the real adapter is wired. A build without it watches each
+/// project's root and repository state and nothing deeper, which is the degraded mode this
+/// subsystem already has a name for, not a failure.
 #[derive(Clone, Copy, Default)]
 pub struct NoopWatchScanner;
 
 impl WatchScanner for NoopWatchScanner {
     fn scan(&self, request: ScanRequest) -> Scan {
-        let paths = if request.root.is_dir() {
-            vec![ScannedPath {
+        Scan {
+            paths: vec![ScannedPath {
                 path: request.root,
                 directory: true,
-            }]
-        } else {
-            Vec::new()
-        };
-        Scan {
-            paths,
+            }],
             truncated: false,
         }
     }

@@ -3,7 +3,7 @@
 //! touching the OS.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::{mpsc, Notify};
@@ -30,6 +30,10 @@ pub struct FakeFileWatcher {
     released: Arc<Notify>,
     sessions: Arc<Mutex<Sessions>>,
     capacity: Option<usize>,
+    open_refused: Mutex<bool>,
+    /// The counter [`FileWatcher::open`]'s most recent caller passed, so [`Self::change_of`] can
+    /// mirror the real adapter's contract: a change that could not be delivered still bumps it.
+    dropped: Mutex<Option<Arc<AtomicU64>>>,
 }
 
 /// What the fake knows about the watches it was asked for, under one lock so a test that sees a
@@ -118,6 +122,18 @@ impl FakeFileWatcher {
     pub fn allow(&self, root: impl Into<PathBuf>) {
         let root = root.into();
         lock(&self.refused).retain(|refused| *refused != root);
+    }
+
+    /// Fails every [`FileWatcher::open`] call from here on, as a backend that could not start
+    /// does. Unlike [`Self::refuse`], which turns down one root a session would otherwise
+    /// register, this turns down the session itself.
+    pub fn refuse_open(&self) {
+        *lock(&self.open_refused) = true;
+    }
+
+    /// Reverses [`Self::refuse_open`]: the next [`FileWatcher::open`] call succeeds again.
+    pub fn allow_open(&self) {
+        *lock(&self.open_refused) = false;
     }
 
     /// Feeds a synthetic changed absolute path to every live watch covering it (best-effort, like
@@ -220,18 +236,26 @@ impl FakeFileWatcher {
     }
 
     /// Feeds a synthetic [`FileChange`] to every live session registration covering `path`
-    /// (best-effort, like [`Self::change`] for the legacy port).
+    /// (best-effort, like [`Self::change`] for the legacy port). A send that could not be
+    /// delivered bumps the `dropped` counter [`FileWatcher::open`]'s caller was given, mirroring
+    /// the real adapter's contract instead of silently discarding it.
     pub fn change_of(&self, path: impl Into<PathBuf>, kind: FileChangeKind) {
         let path = path.into();
+        let dropped = lock(&self.dropped).clone();
         for entry in lock(&self.sessions)
             .live
             .iter()
             .filter(|entry| entry.covers(&path))
         {
-            let _ = entry.sink.try_send(FileChange {
+            let sent = entry.sink.try_send(FileChange {
                 path: path.clone(),
                 kind,
             });
+            if sent.is_err() {
+                if let Some(dropped) = &dropped {
+                    dropped.fetch_add(1, Ordering::Relaxed);
+                }
+            }
         }
     }
 
@@ -291,8 +315,12 @@ impl FileWatcher for FakeFileWatcher {
     fn open(
         &self,
         changes: mpsc::Sender<FileChange>,
-        _dropped: Arc<AtomicU64>,
+        dropped: Arc<AtomicU64>,
     ) -> Result<Arc<dyn WatchSession>, WatchError> {
+        if *lock(&self.open_refused) {
+            return Err(WatchError::Unavailable);
+        }
+        *lock(&self.dropped) = Some(dropped);
         let generation = {
             let mut sessions = lock(&self.sessions);
             let generation = sessions.opened;

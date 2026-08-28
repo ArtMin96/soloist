@@ -468,6 +468,57 @@ async fn a_project_refused_once_is_established_when_the_refusal_clears() {
 }
 
 #[tokio::test]
+async fn a_refused_session_is_retried_on_the_next_resync() {
+    let mut s = setup();
+    s.watcher.refuse_open();
+    let project = s.repo.upsert(&root(), None, None).expect("seed").id;
+    register_command(&s, project, "Build", &["src/**/*.rs"]);
+    let ws = spawn_set(&s);
+    let mut rx = ws.subscribe();
+
+    let announced = next_matching(&mut s.rx, |event| {
+        matches!(event, DomainEvent::WatchLimitChanged { project: p, limits }
+            if *p == project
+                && limits.get(&WatchPurpose::GitStatus)
+                    == Some(&WatchLimit::Refused(WatchError::Unavailable))
+                && limits.get(&WatchPurpose::Restarts)
+                    == Some(&WatchLimit::Refused(WatchError::Unavailable)))
+    })
+    .await;
+    let _ = announced;
+    assert_eq!(
+        s.watcher.sessions_opened(),
+        0,
+        "open() failed, so no session was ever handed out"
+    );
+
+    s.watcher.allow_open();
+    s.bus.publish(DomainEvent::ConfigChanged {
+        project,
+        diff: ConfigSync::default(),
+        requires_trust: false,
+        commands: Vec::new(),
+    });
+
+    let withdrawn = next_matching(&mut s.rx, |event| {
+        matches!(event, DomainEvent::WatchLimitChanged { project: p, limits } if *p == project && limits.is_empty())
+    })
+    .await;
+    let _ = withdrawn;
+
+    assert_eq!(
+        s.watcher.sessions_opened(),
+        1,
+        "the next re-sync opens a fresh session rather than staying wedged"
+    );
+    assert!(s.watcher.registered().contains(&root()));
+    let touched = under("touched");
+    s.watcher
+        .change_of(touched.clone(), FileChangeKind::Modified);
+    expect_change(&mut rx, &touched).await;
+}
+
+#[tokio::test]
 async fn closing_the_last_project_releases_every_watch() {
     let s = setup();
     let project = s.repo.upsert(&root(), None, None).expect("seed").id;
