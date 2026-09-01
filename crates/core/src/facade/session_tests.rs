@@ -2,11 +2,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::*;
+use crate::agents::AgentKind;
 use crate::composition::CorePorts;
 use crate::ports::{ProjectRepo, TokioClock};
+use crate::process::ProcStatus;
 use crate::testing::{
-    session_in_dir, terminal_registration, FakeProjectRepo, FakeSpawner, FakeTrustRepo,
-    TEST_PEER_PGID,
+    bound_session, facade_with_agent_tool, session_in_dir, terminal_registration, wait_all,
+    FakeProjectRepo, FakeSpawner, FakeTrustRepo, TEST_PEER_PGID,
 };
 
 /// A façade over in-memory fakes with the given project repo.
@@ -58,6 +60,46 @@ fn whoami_keeps_the_scope_id_when_the_project_name_cannot_be_read() {
         dimmed.name.is_none(),
         "an unreadable name dims to None, never dropping the whole scope",
     );
+}
+
+/// A session bound to an agent Soloist launched learns which provider it is running as, so a
+/// client can adapt to the CLI hosting it without being told. The launch is the only moment that
+/// fact exists — the supervisor's process model carries no agent taxonomy — so it has to survive
+/// the trip from the launch to the session's own `whoami`.
+#[tokio::test]
+async fn whoami_reports_the_provider_the_bound_agent_was_launched_under() {
+    let (facade, project) = facade_with_agent_tool();
+    let mut events = facade.subscribe();
+    let agent = facade
+        .launch_agent(project, "worker", Vec::new())
+        .expect("launch the agent tool");
+    // The actor records the child's process group as it comes up, so wait for that before
+    // standing in the synthetic group the bind authenticates against.
+    wait_all(&mut events, &[agent], ProcStatus::Running).await;
+    let session = bound_session(&facade, agent, TEST_PEER_PGID);
+
+    assert_eq!(
+        facade.scoped(session).whoami().provider,
+        Some(AgentKind::Generic),
+        "the provider is the kind of the tool the process was launched from",
+    );
+}
+
+/// Only an agent Soloist launched has a provider. A caller bound to a process of another kind, and
+/// one that never bound at all, both report none — so a client reading the field can tell "no agent
+/// here" apart from any particular provider.
+#[test]
+fn a_caller_that_is_not_a_launched_agent_has_no_provider() {
+    let (facade, project) = facade_with_agent_tool();
+
+    let unbound = facade.open_session(PeerCredentials::unauthenticated());
+    assert_eq!(facade.scoped(unbound).whoami().provider, None);
+
+    let terminal = facade
+        .supervisor()
+        .register(terminal_registration(project, "term", "sleep 60"));
+    let bound = bound_session(&facade, terminal, TEST_PEER_PGID);
+    assert_eq!(facade.scoped(bound).whoami().provider, None);
 }
 
 /// An agent Soloist did not launch — no managed process in its group — still resolves its scope

@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
 use super::*;
+use soloist_core::{AgentKind, Origin, SessionId};
 use soloist_ipc::{
     read_frame, write_frame, IpcError, IpcReply, IpcRequest, IpcResponse, IpcResult, ProgressReport,
 };
@@ -469,5 +470,57 @@ async fn losing_the_connection_after_selecting_a_project_does_not_lose_the_selec
         "a project selected before a reconnect must still resolve after it: {outcome:?}",
     );
 
+    server.abort();
+}
+
+/// A fake app that answers every request with a canned identity, so the typed read is exercised
+/// over the real socket and framing.
+async fn identity_server(listener: UnixListener, who: Whoami) {
+    let (mut stream, _addr) = listener.accept().await.expect("accept");
+    while let Some(_request) = read_frame::<_, IpcRequest>(&mut stream)
+        .await
+        .expect("read request")
+    {
+        let reply: IpcResult = Ok(IpcResponse::Whoami(who.clone()));
+        write_frame(&mut stream, &reply).await.expect("write reply");
+    }
+}
+
+#[tokio::test]
+async fn whoami_reads_the_identity_the_app_resolved() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    let listener = UnixListener::bind(&socket).expect("bind");
+    let who = Whoami {
+        session: SessionId::from_raw(1),
+        origin: Origin::Process(ProcessId::from_raw(7)),
+        bound_process: None,
+        provider: Some(AgentKind::Generic),
+        selected_process: None,
+        effective_project: None,
+    };
+    let server = tokio::spawn(identity_server(listener, who.clone()));
+
+    let client = AppClient::new(None, socket);
+    assert_eq!(client.whoami().await.expect("the app answers"), who);
+
+    drop(client);
+    server.abort();
+}
+
+/// A reply of the wrong shape is the app not keeping its side of the protocol, so it is a broken
+/// connection rather than an identity the caller could act on.
+#[tokio::test]
+async fn whoami_treats_a_reply_of_the_wrong_shape_as_a_broken_connection() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    let listener = UnixListener::bind(&socket).expect("bind");
+    let server = tokio::spawn(echo_server(listener));
+
+    let client = AppClient::new(None, socket);
+    let err = client.whoami().await.expect_err("Acked is not an identity");
+    assert!(matches!(err, ClientError::Transport));
+
+    drop(client);
     server.abort();
 }

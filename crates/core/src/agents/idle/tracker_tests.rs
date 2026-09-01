@@ -1,5 +1,5 @@
-//! Tests for the idle tracker — that it classifies tracked agents, ignores unknown ones, and
-//! prunes agents that have left the registry.
+//! Tests for the idle tracker — that it classifies tracked agents, reports the provider each was
+//! launched under, ignores unknown ones, and prunes agents that have left the registry.
 
 use std::collections::HashSet;
 
@@ -28,6 +28,37 @@ fn observe_classifies_a_tracked_agent() {
 fn observe_is_a_noop_for_an_untracked_id() {
     let tracker = IdleTracker::new();
     assert_eq!(tracker.observe(ProcessId::next(), &output(20)), None);
+}
+
+#[test]
+fn provider_reports_the_kind_an_agent_was_tracked_under() {
+    let tracker = IdleTracker::new();
+    let id = ProcessId::next();
+    tracker.track(id, AgentKind::Gemini);
+
+    assert_eq!(tracker.provider(id), Some(AgentKind::Gemini));
+
+    // Re-tracking replaces the entry, so the provider follows the latest launch rather than
+    // lingering from the previous one.
+    tracker.track(id, AgentKind::Codex);
+    assert_eq!(tracker.provider(id), Some(AgentKind::Codex));
+}
+
+#[test]
+fn an_untracked_agent_has_no_provider() {
+    let tracker = IdleTracker::new();
+    let never_tracked = ProcessId::next();
+    let pruned = ProcessId::next();
+    tracker.track(pruned, AgentKind::Gemini);
+
+    tracker.retain_live(&HashSet::new());
+
+    assert_eq!(tracker.provider(never_tracked), None);
+    assert_eq!(
+        tracker.provider(pruned),
+        None,
+        "an agent that left the registry no longer reports a provider"
+    );
 }
 
 #[test]

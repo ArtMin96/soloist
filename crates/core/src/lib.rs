@@ -51,6 +51,7 @@ pub mod trustrequest;
 pub mod vcs;
 pub mod watch;
 pub mod watchset;
+pub mod window;
 
 mod cache;
 mod supervision;
@@ -60,9 +61,11 @@ mod sync;
 pub mod testing;
 
 pub use agents::{
-    AgentActivity, AgentKind, AgentOneShot, AgentTool, AgentToolRepo, Agents, DetectedTool,
-    Detection, NoopAgentOneShot, NoopAgentToolRepo, NoopVersionProbe, OneShotError,
-    OneShotInvocation, PromptMode, VersionProbe, ONE_SHOT_PROMPT_LIMIT, ONE_SHOT_REPLY_LIMIT,
+    resolve as resolve_reply_budget, AgentActivity, AgentKind, AgentOneShot, AgentTool,
+    AgentToolRepo, Agents, BudgetSource, DetectedTool, Detection, ListAnnotation, NoopAgentOneShot,
+    NoopAgentToolRepo, NoopVersionProbe, OneShotError, OneShotInvocation, PromptMode, ReplyBudget,
+    VersionProbe, CHARS_PER_TOKEN, DEFAULT_REPLY_BYTES, ONE_SHOT_PROMPT_LIMIT,
+    ONE_SHOT_REPLY_LIMIT,
 };
 pub use composition::{CorePorts, CorePortsBuilder};
 pub use config::{
@@ -173,3 +176,6 @@ pub use vcs::{
 };
 pub use watch::{WatchError, WatchPurpose};
 pub use watchset::ProjectWatchSet;
+pub use window::{
+    plan as plan_window, Chunk, Cut, LineRange, Piece, Planned, ReadWindow, WindowError,
+};

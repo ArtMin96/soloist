@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use soloist_core::McpToolGroups;
+use soloist_core::{resolve_reply_budget, McpToolGroups, ReplyBudget};
 use soloist_ipc::{read_frame, write_frame, IpcRequest, IpcResult};
 use tokio::net::UnixListener;
 
@@ -46,15 +46,35 @@ pub(crate) fn all_feature_groups() -> McpToolGroups {
     }
 }
 
+/// The reply ceiling a handler is built with unless a test is about the ceiling itself: what a
+/// session bound to no agent resolves to, with nothing in the environment raising it.
+fn default_budget() -> ReplyBudget {
+    resolve_reply_budget(None, |_| None)
+}
+
 /// A handler whose single client connection talks to the fake app on `socket`, with every feature
 /// group enabled.
 pub(crate) fn handler(socket: PathBuf) -> SoloistMcp {
-    SoloistMcp::new(Arc::new(AppClient::new(None, socket)), all_feature_groups())
+    handler_on(socket, all_feature_groups())
 }
 
 /// A handler with the given feature-group enablement, talking to the fake app on `socket`.
 pub(crate) fn handler_on(socket: PathBuf, groups: McpToolGroups) -> SoloistMcp {
-    SoloistMcp::new(Arc::new(AppClient::new(None, socket)), groups)
+    SoloistMcp::new(
+        Arc::new(AppClient::new(None, socket)),
+        groups,
+        default_budget(),
+    )
+}
+
+/// A handler with the given reply ceiling and every feature group enabled, talking to the fake app
+/// on `socket` — for a test about what the ceiling changes.
+pub(crate) fn handler_with_budget(socket: PathBuf, budget: ReplyBudget) -> SoloistMcp {
+    SoloistMcp::new(
+        Arc::new(AppClient::new(None, socket)),
+        all_feature_groups(),
+        budget,
+    )
 }
 
 /// A socket path nothing listens on. A handler built with it can still answer everything it decides

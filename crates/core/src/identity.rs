@@ -13,6 +13,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+use crate::agents::AgentKind;
 use crate::ids::{ProcessId, ProjectId, SessionId};
 use crate::ports::StoreError;
 use crate::process::ProcessView;
@@ -111,10 +112,10 @@ struct Session {
 }
 
 /// What a session resolves to: its caller [`Origin`], the process it is bound to (if any) with
-/// that process's live details, the informational default-target process, and the effective
-/// project a scoped tool would act on (if one can be resolved), named. The answer the `whoami`
-/// tool returns — enriched from bare ids so an agent sees its process's name, kind, and status
-/// and its project's name without a second lookup. The process fields are the canonical
+/// that process's live details and provider, the informational default-target process, and the
+/// effective project a scoped tool would act on (if one can be resolved), named. The answer the
+/// `whoami` tool returns — enriched from bare ids so an agent sees its process's name, kind, and
+/// status and its project's name without a second lookup. The process fields are the canonical
 /// [`ProcessView`] projection, so they read the same here as everywhere else.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Whoami {
@@ -123,6 +124,10 @@ pub struct Whoami {
     /// The managed process this session is bound to, with its name, kind, and status — `None`
     /// for an external or unbound caller.
     pub bound_process: Option<ProcessView>,
+    /// The provider of the bound process when it is an agent Soloist launched; `None` for a
+    /// command, a terminal, an external or an unbound caller.
+    #[serde(default)]
+    pub provider: Option<AgentKind>,
     /// The process the caller selected as an informational default target, if any and still
     /// present. Confers no scope or authority (see [`Identity::select_process`]); reported only
     /// so a caller can confirm its selection.

@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use rmcp::transport::stdio;
 use rmcp::ServiceExt;
-use soloist_core::{ProcessId, PROCESS_ID_ENV};
+use soloist_core::{resolve_reply_budget, ProcessId, PROCESS_ID_ENV};
 use soloist_ipc::socket_path;
 
 use client::AppClient;
@@ -36,9 +36,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // starts and lists its core tools — a settings change is picked up on the next reconnect.
     let groups = client.mcp_tool_groups().await.unwrap_or_default();
 
+    // Size every windowed reply to the ceiling the hosting agent enforces, resolved once: the
+    // process we are bound to — and so the provider hosting us — cannot change for the life of a
+    // stdio connection, and `tools/list` has to carry the figure before any call is made. An
+    // unreachable app leaves the provider unknown, which resolves to the conservative default.
+    let provider = client
+        .whoami()
+        .await
+        .ok()
+        .and_then(|whoami| whoami.provider);
+    let budget = resolve_reply_budget(provider, |var| std::env::var(var).ok());
+
     // Serve over stdio until the MCP client disconnects. The connection to the app is opened
     // lazily on the first request, so this starts even when Soloist is not running.
-    let service = SoloistMcp::new(client, groups).serve(stdio()).await?;
+    let service = SoloistMcp::new(client, groups, budget)
+        .serve(stdio())
+        .await?;
     service.waiting().await?;
     Ok(())
 }

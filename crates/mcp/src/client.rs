@@ -10,7 +10,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use soloist_core::{McpToolGroups, ProcessId, ProjectId};
+use soloist_core::{McpToolGroups, ProcessId, ProjectId, Whoami};
 use soloist_ipc::{
     read_frame, write_frame, IpcError, IpcReply, IpcRequest, IpcResponse, IpcResult,
 };
@@ -210,6 +210,18 @@ impl AppClient {
     pub async fn mcp_tool_groups(&self) -> Result<McpToolGroups, ClientError> {
         match self.request(IpcRequest::McpToolGroups).await? {
             IpcResponse::McpToolGroups(groups) => Ok(groups),
+            _ => Err(ClientError::Transport),
+        }
+    }
+
+    /// Reads who this session is from the app — the server consults this at startup for the
+    /// provider of the process it is bound to, which is what its reply ceiling is sized to. Any
+    /// failure (app down, transport, or a mismatched reply) is the caller's to handle; the server
+    /// falls back to a session with no known provider so it still starts when the app is
+    /// unreachable.
+    pub async fn whoami(&self) -> Result<Whoami, ClientError> {
+        match self.request(IpcRequest::Whoami).await? {
+            IpcResponse::Whoami(who) => Ok(who),
             _ => Err(ClientError::Transport),
         }
     }

@@ -16,6 +16,12 @@ const MCP_TOOLS_VISIBILITY_NOTE: &str =
     "Soloist's server-side count of enabled MCP tools. If your \
 MCP client shows fewer Soloist tools, refresh tool discovery or reconnect the Soloist MCP server.";
 
+/// A value the server composed itself failed to serialize — a fault of this server, not of
+/// anything the caller asked for.
+fn internal(err: serde_json::Error) -> ErrorData {
+    ErrorData::internal_error(err.to_string(), None)
+}
+
 #[tool_router(router = identity_router, vis = "pub(crate)")]
 impl SoloistMcp {
     #[tool(
@@ -23,13 +29,15 @@ impl SoloistMcp {
     )]
     pub(crate) async fn whoami(&self) -> Result<CallToolResult, ErrorData> {
         match self.client.request(IpcRequest::Whoami).await {
-            // The identity and scope come from the core; the enabled-tool count is a fact of this
-            // server's own composed surface, so it is attached here rather than round-tripped.
+            // The identity and scope come from the core; the enabled-tool count and the reply
+            // ceiling are facts of this connection itself, so they are attached here rather than
+            // round-tripped.
             Ok(IpcResponse::Whoami(who)) => {
-                let mut value = serde_json::to_value(&who)
-                    .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
+                let mut value = serde_json::to_value(&who).map_err(internal)?;
+                let budget = serde_json::to_value(self.budget()).map_err(internal)?;
                 if let Some(object) = value.as_object_mut() {
                     object.insert("mcp_tools".into(), self.mcp_tools_status());
+                    object.insert("reply_budget".into(), budget);
                 }
                 structured(&value)
             }
