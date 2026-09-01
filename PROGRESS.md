@@ -9,6 +9,30 @@
 
 ## Current state
 
+> **LATEST (2026-09-02): MCP REPLY BUDGETS + AUTO-CHUNKING — waves 1–2 (todos 53–56) on
+> `feat/mcp-read-auto-chunking`, commits `f9e5834..HEAD`, draft PR #199, `In progress`.** The owner
+> approved the design in Soloist scratchpad `mcp-read-auto-chunking-design` (rev 4) with todos 53–61
+> (tag `mcp-chunking`). Landed: `agents/reply_budget.rs` (one reply ceiling per `AgentKind`, the
+> agent's own env override where the provider documents one, the `tools/list` annotation it honours;
+> 40,000-byte default for unknown providers and unbound sessions), `window.rs` (pure chunk planner
+> over a JSON-escaped cost model, cross-checked against `serde_json`), `IdleTracker::provider` +
+> `Whoami.provider`, and `soloist-mcp` resolving one `ReplyBudget` per connection at startup,
+> annotating the 18 `WINDOWED_TOOLS` in `tools/list`, and reporting `reply_budget` on `whoami`.
+> Every new test was shown to fail under a mutation; the tables are comments on todos 53–56.
+> Per-crate gates green (`cargo test -p soloist-core` 1308, `-p soloist-mcp` 158, cycles 184 edges,
+> dependency-direction OK). **`just lint && just test` has NOT been run on this branch.**
+>
+> **Not done and not started:** todo 57 (the windowed reply helper and `chunk`/`from_line`/`to_line`
+> on the 18 tools; **no reply is windowed yet**, so the user-visible behaviour is unchanged apart from
+> two additive fields), 58 (help topic, `plan/05` §12 gap row, `KNOWN-DIVERGENCES.md` entry), 59
+> (end-to-end transcript, full gates, bundle-size delta), 60 (the `Next:` suggestion is invisible to
+> Claude Code and Codex, found during research), 61 (later seams, tracked only).
+>
+> **Next session should start with:** todo 57, reading the scratchpad §5.3–§5.4 and the comments on
+> todos 54 and 56 for the shipped signatures (`Chunk` carries no `budget_bytes`; the list is
+> `WINDOWED_TOOLS`; `main.rs` logs nothing, so the budget is read from `whoami`). Then 58, then 59,
+> and only then take PR #199 out of draft. Never merge without the owner.
+
 > **LATEST (2026-08-28): BOUNDED PROJECT FILE WATCHING — twenty-two commits through `17f7fc5` on
 > `fix/bounded-project-file-watching`, PR #198, `Done — pending verify`. Measured on real hardware:
 > **57,596 watches / 8 inotify instances → 255 / 1** (~226x), dev build of this branch running
@@ -3830,6 +3854,14 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 ---
 
 ## Decisions / changes this session
+
+### MCP reply budgets + auto-chunking — waves 1–2 (2026-09-02) — `In progress`
+
+- **Design record:** Soloist scratchpad `mcp-read-auto-chunking-design` (research, decisions, placement, contracts, rules); todos 53–61. Decisions resolved with the owner: D1 budget source = the bound process's provider → the agent's own env hint named by the provider rule → the 40,000-byte default, `clientInfo` never read (the 2026-07-28 spec says not to change behaviour on it), and **the mechanism is provider-agnostic: a provider name may appear only as a row of the C4 table**; D2 no Soloist-side setting in v1; D3 the provider's `tools/list` `_meta` annotation is set to the resolved budget on windowed tools; D4 paging is `chunk` plus optional `from_line`/`to_line`.
+- **Gap, not Solo behaviour:** Solo's public record is silent on MCP result size; the `plan/05` §12 row and the `KNOWN-DIVERGENCES.md` entry are todo 58 and are not written yet.
+- **Contract deviations, all recorded on the todos:** `BudgetUnit` dropped (its `Bytes` variant was never constructed; clippy rejects it); `Chunk` carries no `budget_bytes` (the adapter envelope adds it); `WindowError::{ChunkOutOfRange, LineRangeOutOfRange, Empty, NoCapacity}`; the tool list is `WINDOWED_TOOLS` (it also holds six write-echo tools); no startup log line (`main.rs` logs nothing; `whoami` reports `reply_budget`).
+- **Found during research:** rmcp `CallToolResult::structured` emits both a text block and `structuredContent`; Claude Code and Codex read only the structured half, Gemini and Kimi only the text half. Chunk markers therefore go inside the structured value (todo 57), and the existing `Next:` suggestion block is invisible to Claude Code and Codex (todo 60). Writing the design scratchpad itself echoed 67,401 characters and was persisted to disk by Claude Code, which is why write-echo tools are in scope.
+- **Process:** one implementer agent per todo with an exclusive write set; each reported search-first results, a mutation table and the per-crate gates; the orchestrator reviewed each diff before closing the todo.
 
 ### Bounded file watching — the review-fix pass (2026-08-28) — `Done — pending verify`
 
