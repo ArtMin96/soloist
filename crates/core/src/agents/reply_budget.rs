@@ -8,6 +8,8 @@
 //! here, and every provider resolves through the same table. Reading the environment belongs to
 //! the caller: [`resolve`] is handed a lookup and consults nothing itself.
 
+use serde::Serialize;
+
 use super::tool::AgentKind;
 
 /// Bytes assumed per token where a provider states its ceiling in tokens. Tokenisation depends
@@ -21,7 +23,7 @@ pub const DEFAULT_REPLY_BYTES: usize = 40_000;
 
 /// The most bytes one MCP tool reply may total for a hosting agent, and how that figure was
 /// reached. `bytes` counts the compact JSON of the whole reply.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct ReplyBudget {
     /// The ceiling a reply is composed to stay under.
     pub bytes: usize,
@@ -32,7 +34,8 @@ pub struct ReplyBudget {
 }
 
 /// Where a [`ReplyBudget`] came from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum BudgetSource {
     /// The hosting agent's own environment set the ceiling, through the variable its provider
     /// documents for that purpose.
@@ -46,7 +49,7 @@ pub enum BudgetSource {
 /// A `tools/list` `_meta` entry a client honours to raise its inline ceiling. `key` is the
 /// annotation the provider documents and `bytes` the budget it is told to allow — the same
 /// figure replies are already sized to, so what is advertised and what is sent agree.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct ListAnnotation {
     pub key: &'static str,
     pub bytes: usize,

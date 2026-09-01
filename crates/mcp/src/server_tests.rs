@@ -5,13 +5,13 @@ use rmcp::ServerHandler;
 use soloist_core::{
     AcquireOutcome, AgentBroadcastReceipt, AgentKind, AgentMessage, AgentMessageDelivery,
     AgentMessageId, AgentMessageKind, AgentMessageOutcome, AgentMessageReceipt, AgentRelationship,
-    AgentRosterEntry, AgentTool, Comment, CompletionNotification, CompletionReport, DiagramId,
-    DiagramSummary, DiagramView, FireCond, LeaseView, LinkContent, McpToolGroups, Origin,
-    ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, ProjectRef, PromptMode, Readiness,
-    ScratchpadId, ScratchpadLink, ScratchpadRef, ScratchpadSummary, ScratchpadView, SessionId,
-    SetWhenIdleOutcome, StartSummary, TimerId, TimerStatus, TimerView, TodoCompletion,
-    TodoCompletionKey, TodoCompletionOccurrence, TodoDoc, TodoId, TodoStatus, TodoSummary,
-    TodoView, Whoami,
+    AgentRosterEntry, AgentTool, BudgetSource, Comment, CompletionNotification, CompletionReport,
+    DiagramId, DiagramSummary, DiagramView, FireCond, LeaseView, LinkContent, ListAnnotation,
+    McpToolGroups, Origin, ProcStatus, ProcessId, ProcessKind, ProcessView, ProjectId, ProjectRef,
+    PromptMode, Readiness, ReplyBudget, ScratchpadId, ScratchpadLink, ScratchpadRef,
+    ScratchpadSummary, ScratchpadView, SessionId, SetWhenIdleOutcome, StartSummary, TimerId,
+    TimerStatus, TimerView, TodoCompletion, TodoCompletionKey, TodoCompletionOccurrence, TodoDoc,
+    TodoId, TodoStatus, TodoSummary, TodoView, Whoami,
 };
 use soloist_core::{
     BranchInfo, ChangeKind, DiffExtent, DiffTarget, FileChange, GitError, GitFileStatus, GitStatus,
@@ -26,7 +26,11 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use crate::testing::{all_feature_groups, handler, handler_with_groups, spawn_fake_app};
+use soloist_core::resolve_reply_budget;
+
+use crate::testing::{
+    all_feature_groups, handler, handler_with_budget, handler_with_groups, spawn_fake_app,
+};
 use crate::tools::progress::Reporting;
 
 use crate::args::{
@@ -302,6 +306,112 @@ fn every_featured_tool_is_actually_served() {
         assert!(
             served.contains(*name),
             "featured tool {name} must be served"
+        );
+    }
+}
+
+/// A reply ceiling with a made-up key, variable and figure. What is under test is that whatever the
+/// budget carries reaches the wire, so asserting a real provider's published key or limit here
+/// would pin the core's table instead of this adapter's wiring.
+const ANNOTATION_KEY: &str = "vendor/limit";
+const ANNOTATED_BYTES: usize = 12_345;
+const OVERRIDE_VAR: &str = "VENDOR_REPLY_TOKEN_LIMIT";
+const ANNOTATED_BUDGET: ReplyBudget = ReplyBudget {
+    bytes: ANNOTATED_BYTES,
+    source: BudgetSource::AgentEnv { var: OVERRIDE_VAR },
+    annotation: Some(ListAnnotation {
+        key: ANNOTATION_KEY,
+        bytes: ANNOTATED_BYTES,
+    }),
+};
+
+/// The field a `tools/list` entry's metadata travels under on the wire, the JSON Schema keyword its
+/// parameters are listed under, and the parameter that asks for the next window of a reply.
+const META_FIELD: &str = "_meta";
+const SCHEMA_PROPERTIES: &str = "properties";
+const CHUNK_PARAMETER: &str = "chunk";
+
+/// `tools/list` advertises the connection's reply ceiling on exactly the tools whose replies are
+/// windowed to it, under the key the budget names — and on no other tool, so a client is asked for
+/// extra room only where Soloist actually fills it.
+#[test]
+fn tools_list_advertises_the_ceiling_on_exactly_the_windowed_tools() {
+    let handler = handler_with_budget(PathBuf::from("unused.sock"), ANNOTATED_BUDGET);
+    let windowed: BTreeSet<&str> = WINDOWED_TOOLS.iter().copied().collect();
+    let mut advertised = 0;
+
+    for tool in handler.listed_tools() {
+        let wire = serde_json::to_value(&tool).expect("serialize the listed tool");
+        let meta = wire.get(META_FIELD);
+        match windowed.contains(tool.name.as_ref()) {
+            true => {
+                assert_eq!(
+                    meta.and_then(|meta| meta.get(ANNOTATION_KEY)),
+                    Some(&serde_json::json!(ANNOTATED_BYTES)),
+                    "{} is windowed, so it advertises the ceiling",
+                    tool.name
+                );
+                advertised += 1;
+            }
+            false => assert_eq!(meta, None, "{} is not windowed", tool.name),
+        }
+    }
+
+    assert_eq!(
+        advertised,
+        WINDOWED_TOOLS.len(),
+        "every windowed tool was listed and advertised"
+    );
+}
+
+/// A budget with nothing to advertise lists every tool untouched, so a client whose provider
+/// honours no such key is told nothing rather than told something it will not read.
+#[test]
+fn tools_list_advertises_nothing_without_an_annotation_to_carry() {
+    let budget = resolve_reply_budget(None, |_| None);
+    assert!(
+        budget.annotation.is_none(),
+        "a session with no known provider has no annotation to advertise"
+    );
+
+    for tool in handler_with_budget(PathBuf::from("unused.sock"), budget).listed_tools() {
+        assert!(tool.meta.is_none(), "{} carries no metadata", tool.name);
+    }
+}
+
+/// Every windowed name is a real served tool and none is named twice, so a rename or a typo cannot
+/// leave an entry that advertises nothing and windows nothing.
+#[test]
+fn every_windowed_tool_is_actually_served() {
+    let served = served_tools(&handler(PathBuf::from("unused.sock")));
+    for name in WINDOWED_TOOLS {
+        assert!(
+            served.contains(*name),
+            "windowed tool {name} must be served"
+        );
+    }
+    assert_eq!(
+        WINDOWED_TOOLS.iter().collect::<BTreeSet<_>>().len(),
+        WINDOWED_TOOLS.len(),
+        "no tool is named twice"
+    );
+}
+
+/// A `chunk` parameter is how a caller asks for the next window of a reply, so a tool that takes one
+/// has a windowed reply and must advertise the ceiling those windows are sized to. Keeps the two
+/// from drifting apart as chunking lands tool by tool.
+#[test]
+fn every_tool_that_takes_a_chunk_is_windowed() {
+    for tool in handler(PathBuf::from("unused.sock")).listed_tools() {
+        let takes_chunk = tool
+            .input_schema
+            .get(SCHEMA_PROPERTIES)
+            .and_then(|properties| properties.get(CHUNK_PARAMETER))
+            .is_some();
+        assert!(
+            !takes_chunk || WINDOWED_TOOLS.contains(&tool.name.as_ref()),
+            "{} takes a chunk, so its reply is windowed and must advertise the ceiling",
+            tool.name
         );
     }
 }
@@ -661,6 +771,35 @@ async fn whoami_projects_the_resolved_identity_and_the_enabled_tool_count() {
             > 0
     );
     assert!(mcp_tools["visibility_note"].is_string());
+}
+
+/// `whoami` reports the ceiling this connection resolved and where that figure came from, so an
+/// agent can read what its replies are sized to instead of inferring it from a cut-off result.
+#[tokio::test]
+async fn whoami_reports_the_reply_ceiling_resolved_for_this_connection() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("soloist-ipc.sock");
+    let who = Whoami {
+        session: SessionId::from_raw(1),
+        origin: Origin::Unbound,
+        bound_process: None,
+        provider: None,
+        selected_process: None,
+        effective_project: None,
+    };
+    spawn_fake_app(socket.clone(), move |_request| {
+        Ok(IpcResponse::Whoami(who.clone()))
+    });
+
+    let result = handler_with_budget(socket, ANNOTATED_BUDGET)
+        .whoami()
+        .await
+        .expect("whoami succeeds");
+    let budget = structured_of(result)["reply_budget"].clone();
+
+    assert_eq!(budget["bytes"], ANNOTATED_BYTES);
+    assert_eq!(budget["source"]["kind"], "agent_env");
+    assert_eq!(budget["source"]["value"]["var"], OVERRIDE_VAR);
 }
 
 #[tokio::test]

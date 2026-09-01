@@ -18,12 +18,12 @@ use std::sync::Arc;
 use rmcp::handler::server::tool::{ToolCallContext, ToolRouter};
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, GetPromptRequestParams,
-    GetPromptResponse, Implementation, ListPromptsResult, ListToolsResult, PaginatedRequestParams,
-    PromptsCapability, ServerCapabilities, ServerInfo, Tool,
+    GetPromptResponse, Implementation, ListPromptsResult, ListToolsResult, MetaObject,
+    PaginatedRequestParams, PromptsCapability, ServerCapabilities, ServerInfo, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{tool_handler, ErrorData, RoleServer, ServerHandler};
-use soloist_core::{onboarding_hint, McpFeatureGroup, McpToolGroups};
+use soloist_core::{onboarding_hint, McpFeatureGroup, McpToolGroups, ReplyBudget};
 
 use crate::cache_hints::WithCacheHints;
 use crate::client::AppClient;
@@ -64,6 +64,32 @@ const FEATURED_TOOLS: &[&str] = &[
     "send_input",
 ];
 
+/// The tools whose reply is windowed to the connection's budget, and therefore the ones that carry
+/// the provider's `tools/list` annotation — every tool that can hand back a document, a stored
+/// value, a span of process output, or a diff, in either direction. A name here that is not a
+/// served tool would annotate nothing and window nothing, so a test guards against a typo or a
+/// rename leaving a dangling entry.
+pub(crate) const WINDOWED_TOOLS: &[&str] = &[
+    "scratchpad_read",
+    "todo_get",
+    "diagram_read",
+    "prompt_template_read",
+    "prompt_template_export",
+    "prompt_template_render",
+    "kv_get",
+    "get_process_output",
+    "get_process_raw_output",
+    "search_output",
+    "search_raw_output",
+    "git_diff",
+    "scratchpad_write",
+    "diagram_write",
+    "todo_create",
+    "todo_update",
+    "prompt_template_create",
+    "prompt_template_update",
+];
+
 /// The Soloist MCP server: a stateless front over the app, holding one client connection.
 #[derive(Clone)]
 pub struct SoloistMcp {
@@ -72,6 +98,10 @@ pub struct SoloistMcp {
     /// Which feature groups the user has enabled. Held beyond composing the router because the
     /// prompts primitive is gated by the same settings but is not a router entry.
     groups: McpToolGroups,
+    /// The reply ceiling resolved once for this connection. The hosting agent — and so the ceiling
+    /// it enforces — is fixed for the life of a stdio connection, and `tools/list` has to carry the
+    /// figure before any call is made, so it is resolved at startup rather than per reply.
+    budget: ReplyBudget,
     /// The per-session decaying next-tool suggestions. Shared across handler clones so the decay
     /// counts are one ledger for the connection.
     suggestions: Arc<Suggestions>,
@@ -80,8 +110,9 @@ pub struct SoloistMcp {
 impl SoloistMcp {
     /// Builds the handler over a client connection to the app. The core tool groups are always
     /// composed; each feature group is added only when `groups` enables it, so a disabled group is
-    /// absent from `list_tools` and uncallable.
-    pub fn new(client: Arc<AppClient>, groups: McpToolGroups) -> Self {
+    /// absent from `list_tools` and uncallable. `budget` is the ceiling every windowed reply on this
+    /// connection is sized to.
+    pub fn new(client: Arc<AppClient>, groups: McpToolGroups, budget: ReplyBudget) -> Self {
         // Compose the served router from the single group list: core groups always, each feature
         // group only when the user's settings enable it, so a disabled group is absent from
         // `list_tools` and uncallable.
@@ -99,8 +130,14 @@ impl SoloistMcp {
             client,
             tool_router,
             groups,
+            budget,
             suggestions: Arc::new(Suggestions::default()),
         }
+    }
+
+    /// The reply ceiling this connection is sized to.
+    pub(crate) fn budget(&self) -> &ReplyBudget {
+        &self.budget
     }
 
     /// Whether the prompts primitive is served.
@@ -202,6 +239,32 @@ impl SoloistMcp {
         }
         featured.extend(rest);
         featured
+    }
+
+    /// The tools `tools/list` serves: ordered for discovery (see
+    /// [`featured_tool_list`](Self::featured_tool_list)), with this connection's reply ceiling
+    /// advertised on every [`WINDOWED_TOOLS`] entry, so a client is told the figure those replies
+    /// are already sized to and does not cut one short. The key and the figure both come from the
+    /// budget, which is the only thing that knows what the hosting agent honours.
+    ///
+    /// A budget with no annotation to advertise — the provider honours none, or none is known —
+    /// serves the same tools untouched, and a windowed tool whose feature group is disabled is
+    /// simply not listed and so not annotated.
+    fn listed_tools(&self) -> Vec<Tool> {
+        let mut tools = self.featured_tool_list();
+        let Some(annotation) = self.budget.annotation else {
+            return tools;
+        };
+        let mut meta = MetaObject::new();
+        meta.0
+            .insert(annotation.key.to_owned(), annotation.bytes.into());
+        for tool in tools
+            .iter_mut()
+            .filter(|tool| WINDOWED_TOOLS.contains(&tool.name.as_ref()))
+        {
+            tool.meta = Some(meta.clone());
+        }
+        tools
     }
 
     /// Every tool group in display order — the single list [`new`](Self::new) composes the served
@@ -359,17 +422,18 @@ impl ServerHandler for SoloistMcp {
         self.prompt_get(request).await.map(Into::into)
     }
 
-    /// Serves `tools/list` with the featured tools first (see [`SoloistMcp::featured_tool_list`])
-    /// rather than rmcp's default alphabetical order, so a client that preserves server order shows
-    /// `whoami` and `help` up top. Providing this suppresses the `#[tool_handler]` macro's default
-    /// `list_tools`, [caching hints](WithCacheHints) and all. The full surface is unchanged — only
-    /// its order — and there is no pagination.
+    /// Serves `tools/list` with the featured tools first and the reply ceiling advertised on the
+    /// windowed ones (see [`SoloistMcp::listed_tools`]), rather than rmcp's default alphabetical
+    /// order, so a client that preserves server order shows `whoami` and `help` up top. Providing
+    /// this suppresses the `#[tool_handler]` macro's default `list_tools`,
+    /// [caching hints](WithCacheHints) and all. The full surface is unchanged, and there is no
+    /// pagination.
     async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(self.featured_tool_list())
+        Ok(ListToolsResult::with_all_items(self.listed_tools())
             .with_cache_hints(context.protocol_version()))
     }
 
