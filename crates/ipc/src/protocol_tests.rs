@@ -295,8 +295,10 @@ fn every_response_variant_round_trips_through_json() {
         IpcResponse::Whoami(Whoami {
             session: SessionId::from_raw(1),
             origin: Origin::Process(ProcessId::from_raw(7)),
-            // Populated so the enriched process and project projections round-trip in the envelope.
+            // Populated so the enriched process, provider and project projections round-trip in
+            // the envelope.
             bound_process: Some(view.clone()),
+            provider: Some(AgentKind::Claude),
             selected_process: None,
             effective_project: Some(ProjectRef {
                 id: ProjectId::from_raw(1),

@@ -632,6 +632,7 @@ async fn whoami_projects_the_resolved_identity_and_the_enabled_tool_count() {
         session: SessionId::from_raw(1),
         origin: Origin::Process(ProcessId::from_raw(7)),
         bound_process: Some(sample_view(7)),
+        provider: Some(AgentKind::Claude),
         selected_process: None,
         effective_project: Some(ProjectRef {
             id: ProjectId::from_raw(1),

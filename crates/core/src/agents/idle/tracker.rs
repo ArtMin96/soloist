@@ -47,6 +47,13 @@ impl IdleTracker {
         lock(&self.agents).get(&id).and_then(Classifier::current)
     }
 
+    /// The provider `id` was launched under, or `None` if it is untracked — a process that is not
+    /// an agent Soloist launched, or one that has since left the registry. A snapshot read the
+    /// façade uses to tell a bound caller which agent it is running as.
+    pub fn provider(&self, id: ProcessId) -> Option<AgentKind> {
+        lock(&self.agents).get(&id).map(Classifier::kind)
+    }
+
     /// The current activity of every tracked agent classified at least once, as `(id, activity)`
     /// pairs. The snapshot the UI seeds its idle badges from: an agent still starting up (tracked
     /// but not yet classified) contributes nothing, since its badge shows the status glyph until

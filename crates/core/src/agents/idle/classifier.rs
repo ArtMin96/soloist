@@ -8,10 +8,11 @@ use crate::terminal::TerminalActivity;
 use super::strategy::{strategy_for, AgentMemory, IdleStrategy};
 use crate::idle::AgentActivity;
 
-/// Tracks one agent's activity over successive terminal samples. Holds the provider's
+/// Tracks one agent's activity over successive terminal samples. Holds the provider, its
 /// heuristic, its rolling memory, and the last activity reported, so it can emit only on a
 /// transition.
 pub(super) struct Classifier {
+    kind: AgentKind,
     strategy: &'static dyn IdleStrategy,
     memory: AgentMemory,
     current: Option<AgentActivity>,
@@ -21,10 +22,16 @@ impl Classifier {
     /// A classifier for an agent of the given provider, before its first sample.
     pub(super) fn new(kind: AgentKind) -> Self {
         Self {
+            kind,
             strategy: strategy_for(kind),
             memory: AgentMemory::default(),
             current: None,
         }
+    }
+
+    /// The provider this agent was launched under.
+    pub(super) fn kind(&self) -> AgentKind {
+        self.kind
     }
 
     /// Feeds one terminal sample. Returns `Some(activity)` when the classification changed

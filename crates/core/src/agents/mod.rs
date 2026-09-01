@@ -11,6 +11,7 @@ mod headless;
 pub mod idle;
 mod lineage;
 mod oneshot;
+mod reply_budget;
 mod repo;
 mod resume;
 mod tool;
@@ -21,6 +22,9 @@ pub use lineage::AgentLineage;
 pub use oneshot::{
     AgentOneShot, NoopAgentOneShot, OneShotError, OneShotInvocation, ONE_SHOT_PROMPT_LIMIT,
     ONE_SHOT_REPLY_LIMIT,
+};
+pub use reply_budget::{
+    resolve, BudgetSource, ListAnnotation, ReplyBudget, CHARS_PER_TOKEN, DEFAULT_REPLY_BYTES,
 };
 pub use repo::{AgentToolRepo, NoopAgentToolRepo};
 pub use tool::{AgentKind, AgentTool, PromptMode};

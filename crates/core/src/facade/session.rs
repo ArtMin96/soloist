@@ -166,15 +166,16 @@ impl ScopedFacade<'_> {
         Ok(())
     }
 
-    /// Resolves who a session is and the project its scoped tools act on (the answer to
-    /// the `whoami` tool), enriched with the bound process's details and the project's name.
+    /// Resolves who a session is and the project its scoped tools act on (the answer to the
+    /// `whoami` tool), enriched with the bound process's details and provider and the project's
+    /// name.
     pub fn whoami(&self) -> Whoami {
         let origin = self.inner.identity.origin(self.session);
+        let bound = origin.process();
         Whoami {
             session: self.session,
-            bound_process: origin
-                .process()
-                .and_then(|process| self.inner.process_view(process)),
+            bound_process: bound.and_then(|process| self.inner.process_view(process)),
+            provider: bound.and_then(|process| self.inner.idle.provider(process)),
             // Resolving the view also drops a selection whose process has since left the registry
             // (e.g. it was closed), so `whoami` never echoes a dangling id.
             selected_process: self
