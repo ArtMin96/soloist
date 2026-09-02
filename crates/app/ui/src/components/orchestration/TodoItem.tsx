@@ -28,13 +28,18 @@ export function TodoItem({ todo, onOpen, lockOwnerLabel, onOpenAgent }: TodoItem
     // to each other than one card sits to the next, which is what makes a card read as one thing.
     //
     // The edge is a transparency of the ink, not `--border`: that token resolves close to the pane
-    // in both themes (1.31:1 light, 1.44:1 dark), so a card drawn with it reads in neither. The fill
-    // cannot carry this either — any tint strong enough to read as an edge reads as a selected row,
-    // and the rest-to-hover fill step is worth only 1.05:1, so the border carries the whole state.
-    //
+    // in both themes (1.31:1 light, 1.44:1 dark), so a card drawn with it reads in neither, and no
+    // fill substitutes for it — any tint strong enough to read as an edge reads as a selected row.
     // The alpha is per-theme because one value cannot clear 3:1 on both grounds: ink on a near-white
-    // pane needs roughly half again the opacity that ink on a near-black one does. Keep the rest and
-    // hover alphas well apart, since nothing else marks the difference.
+    // pane needs roughly half again the opacity that ink on a near-black one does.
+    //
+    // Hover is carried by the border alone — the rest-to-hover fill step is worth only 1.05:1 — so
+    // the two alphas have to stay far apart or the state change is imperceptible.
+    //
+    // The resting alphas are a ceiling, not a floor. At 45% the outline already matches the status
+    // chips' own outlines for weight; raising it puts the card's structure above the content it
+    // frames. The gap between cards is what does the grouping, so a stronger edge buys contrast the
+    // boundary does not need.
     <div className="flex items-center gap-1 rounded-lg border border-foreground/45 bg-muted p-1 transition-colors duration-[var(--dur-fast)] hover:border-foreground/60 dark:border-foreground/32 dark:hover:border-foreground/45">
       {/* The card's own button and the agent control are siblings, not nested — a lock never buries
           an interactive control inside another one, so each is its own tab stop. */}

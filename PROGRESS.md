@@ -7785,5 +7785,10 @@ and left as written.
 **Measuring colour in this app — read before trusting a number.** Computed values resolve to `oklab()`, so a
 regex over `getComputedStyle` reads L/a/b as r/g/b and returns confident nonsense. Rasterise through a 1×1
 canvas instead. That is only half of it: `background-clip: border-box` means a translucent border composites
-over the element's **own fill**, not the surface behind it. Three measurement errors this session each briefly
-implied a real fix was unnecessary — a broken measurement tends to argue against whatever it is measuring.
+over the element's **own fill**, not the surface behind it. Four measurement failures this session shared one shape: **a check that can
+pass vacuously will, and it will look like good news.** An `oklab` value parsed as RGB said a fix had
+regressed; a Python port using `or` where TypeScript uses `??` made an empty `{}` fall through; probing a
+Tailwind class that the JIT never emitted returned the default; and a git pathspec run from the wrong
+directory matched nothing and printed an empty diff, which read as "no changes found". Each produced a
+confident answer that argued for doing nothing. Cross-check a suspicious figure against arithmetic before
+acting on it — that is what caught all four.
