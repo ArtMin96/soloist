@@ -7774,11 +7774,18 @@ and left as written.
    out of scope. Not a hex; an architecture call.
 2. Row **tags** and the **locked-by control** have still never been seen rendered — both are MCP-only with no
    Tauri command, confirmed `rowsWithTags: 0` / `rowsWithLock: 0` across six live rows.
-3. `todo-e2e`'s mutation pass never completed. Both coordination specs were **12/12 green** before the header
-   rebuild, the `Edit` accessible-name change ("Edit todo" → "Edit"), the `⋯` menu tier and the 960px floor
-   landed; they need re-running.
-4. Fixture todos **#81–83** are in the user's real Soloist project and need deleting (MCP-only).
-5. Deferred, both real: clearing `orchestrationFocus` upstream in `App.tsx` (also cures `ScratchpadPanel`
+3. **The panel-position bug is uncovered by e2e, deliberately.** `getBoundingClientRect()` forces a layout
+   flush and cannot observe compositing staleness, so a rect assertion would certify the bug rather than
+   catch it, and the harness has no visual-regression capability. Adding one is real infrastructure and a
+   charter decision. (The mutation pass itself *is* complete: three mutations each reddened only their own
+   assertion, and both coordination specs are **12/12 green** against the tree after the 960px floor, the
+   chevron removal, the `InputGroup` toolbar and the three-band header all landed.)
+4. **Rail-at-max (144px) has no spec.** It is a different guarantee from "the app's minimum window" — the
+   narrowest a user can *drag* the pane, not the smallest window allowed — and needs a rail-drag arrange step.
+   `todo-detail` measured a real header overflow floor at a 140px pane, so 144px sits four pixels above it,
+   which is the kind of margin that stops being true after one restyle. Worth a catalog row.
+5. Fixture todos **#81–83** are in the user's real Soloist project and need deleting (MCP-only).
+6. Deferred, both real: clearing `orchestrationFocus` upstream in `App.tsx` (also cures `ScratchpadPanel`
    re-opening its last-navigated scratchpad), and the `type-*` ramp restated as raw rem literals in ~147
    further call sites across 80 files.
 
