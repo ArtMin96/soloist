@@ -5,7 +5,13 @@ import { DocumentList, type DocumentRow } from "@/components/orchestration/Docum
 
 afterEach(cleanup);
 
-const doc = (id: number, name: string, gist = ""): DocumentRow => ({ id, name, revision: 1, gist });
+const doc = (id: number, name: string, gist = "", tags: string[] = []): DocumentRow => ({
+  id,
+  name,
+  revision: 1,
+  gist,
+  tags,
+});
 
 const docs = [doc(1, "plan", "the plan"), doc(2, "research"), doc(3, "risks")];
 
@@ -149,6 +155,25 @@ describe("DocumentList", () => {
       "risks",
     ]);
     expect(document.querySelector("[data-diagram-name]")).toBeNull();
+  });
+
+  it("shows a row's tags, and shows no tag chip on an untagged row", () => {
+    const rows = [doc(1, "plan", "the plan", ["a", "b"]), doc(2, "research")];
+    render(
+      <DocumentList
+        items={rows}
+        selected={null}
+        onSelect={vi.fn()}
+        label="Docs"
+        emptyHint={EMPTY_HINT}
+        kind="scratchpad"
+      />,
+    );
+    const options = screen.getAllByRole("option");
+    expect(options[0].textContent).toContain("a");
+    expect(options[0].textContent).toContain("b");
+    expect(options[0].querySelectorAll("[data-tag]").length).toBe(2);
+    expect(options[1].querySelectorAll("[data-tag]").length).toBe(0);
   });
 
   it("stamps each row with the diagram handle attribute when kind is diagram, never a scratchpad's", () => {

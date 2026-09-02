@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { commentAuthorLabel, TODO_STATUS } from "@/lib/todo";
+import type { TodoStatus } from "@/domain";
+import { commentAuthorLabel, TODO_STATUS, TODO_STATUS_ICON, unmetBlockerLabel } from "@/lib/todo";
+
+const STATUSES: TodoStatus[] = ["open", "blocked", "in_progress", "done"];
 
 describe("todo display helpers", () => {
   it("labels every todo status with a distinct, non-empty label", () => {
@@ -16,5 +19,17 @@ describe("todo display helpers", () => {
     expect(commentAuthorLabel({ kind: "process", id: 4, label: "Web" })).toBe("Web");
     expect(commentAuthorLabel({ kind: "external", label: "raycast" })).toBe("raycast");
     expect(commentAuthorLabel(null)).toBe("unattributed");
+  });
+
+  it("gives every todo status an icon", () => {
+    for (const status of STATUSES) {
+      expect(TODO_STATUS_ICON[status]).toBeDefined();
+    }
+  });
+
+  it("reads one unmet blocker singular and any other count plural", () => {
+    expect(unmetBlockerLabel(1)).toBe("1 unmet blocker");
+    expect(unmetBlockerLabel(3)).toBe("3 unmet blockers");
+    expect(unmetBlockerLabel(0)).toBe("0 unmet blockers");
   });
 });

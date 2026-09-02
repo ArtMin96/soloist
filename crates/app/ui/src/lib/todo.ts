@@ -1,4 +1,12 @@
+import {
+  BanIcon,
+  CircleCheckIcon,
+  CircleDashedIcon,
+  CircleDotIcon,
+  type LucideIcon,
+} from "lucide-react";
 import type { CommentAuthor, TodoStatus } from "@/domain";
+import type { Option } from "@/lib/appearance";
 
 // The single source for a todo's declared lifecycle label. This is the status an agent *declares*
 // (Open / In progress / Done / Blocked) — distinct from the derived blocker **gate** (`TodoView.blocked`),
@@ -22,4 +30,28 @@ export const TODO_STATUS_ORDER: TodoStatus[] = ["open", "in_progress", "blocked"
 export function commentAuthorLabel(author: CommentAuthor | null): string {
   if (author == null) return "unattributed";
   return author.label;
+}
+
+/** How the board arranges its rows. Grouped is the default — most work comes out of a document. */
+export type BoardView = "grouped" | "all";
+
+// The one definition of the board's view options, so the toolbar's control and the board's own
+// state agree on the same two values without a second literal list to drift.
+export const BOARD_VIEWS: Option<BoardView>[] = [
+  { value: "all", label: "All" },
+  { value: "grouped", label: "By scratchpad" },
+];
+
+// The glyph each declared status wears, redundant with `TODO_STATUS`'s text label rather than a
+// replacement for it — a row reads without color alone. Monochrome, same discipline as the label.
+export const TODO_STATUS_ICON: Record<TodoStatus, LucideIcon> = {
+  open: CircleDashedIcon,
+  in_progress: CircleDotIcon,
+  blocked: BanIcon,
+  done: CircleCheckIcon,
+};
+
+// The exact wording for a row's unmet-blocker count — singular only at exactly one.
+export function unmetBlockerLabel(count: number): string {
+  return count === 1 ? "1 unmet blocker" : `${count} unmet blockers`;
 }

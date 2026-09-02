@@ -96,8 +96,10 @@ const todo = (id: number, title: string, scratchpad: ScratchpadRef | null): Todo
 
 const todos = [todo(1, "Ship the release", plan), todo(2, "Triage inbox", null)];
 
-function board(rows: TodoView[] = todos) {
-  return render(<TodoBoard project={1} todos={rows} agents={[]} scratchpads={[pad]} />);
+function board(rows: TodoView[] = todos, overrides: Partial<Parameters<typeof TodoBoard>[0]> = {}) {
+  return render(
+    <TodoBoard project={1} todos={rows} agents={[]} scratchpads={[pad]} {...overrides} />,
+  );
 }
 
 /** The board's group headers, in render order, read off the handle that carries the label itself. */
@@ -208,5 +210,92 @@ describe("TodoBoard", () => {
 
     expect(groupLabels()).toEqual([]);
     expect(screen.getByText(/No todos yet/)).toBeTruthy();
+  });
+
+  it("renders exactly one toolbar and no second filter strip", () => {
+    board();
+
+    expect(document.querySelectorAll("[data-todo-toolbar]")).toHaveLength(1);
+  });
+
+  it("hides New todo from the toolbar while the create form is open", () => {
+    board();
+    expect(screen.getByRole("button", { name: /New todo/ })).toBeTruthy();
+
+    session.mode = "create";
+    session.initial = { title: "", body: "", status: "open" };
+    cleanup();
+    board();
+
+    expect(screen.queryByRole("button", { name: /New todo/ })).toBeNull();
+  });
+
+  it("expands the focusId row and moves focus to its trigger when focusNonce changes", () => {
+    const { rerender } = board(todos, { focusId: 2, focusNonce: undefined });
+
+    expect(document.activeElement?.getAttribute("data-todo-trigger")).toBeNull();
+
+    rerender(
+      <TodoBoard
+        project={1}
+        todos={todos}
+        agents={[]}
+        scratchpads={[pad]}
+        focusId={2}
+        focusNonce={1}
+      />,
+    );
+
+    const row = document.querySelector('[data-todo-id="2"] [data-todo-trigger]');
+    expect(document.activeElement).toBe(row);
+    expect(screen.getByText("Triage inbox")).toBeTruthy();
+  });
+
+  it("focuses the target once it arrives, when focusNonce was set before the todos did", () => {
+    // Mirrors a pane that mounts fresh and asks for a focus before its first snapshot lands:
+    // the row named by `focusId` is not in `todos` on the first render at all.
+    const { rerender } = board([], { focusId: 2, focusNonce: 1 });
+
+    expect(document.activeElement?.getAttribute("data-todo-trigger")).toBeNull();
+
+    rerender(
+      <TodoBoard
+        project={1}
+        todos={todos}
+        agents={[]}
+        scratchpads={[pad]}
+        focusId={2}
+        focusNonce={1}
+      />,
+    );
+
+    const row = document.querySelector('[data-todo-id="2"] [data-todo-trigger]');
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("expands a collapsed group and clears a hiding filter to reach the focus target", () => {
+    const { rerender } = board(todos);
+    // Collapse the target's group and filter it out before requesting focus, the way a real
+    // board could be arranged when the navigation arrives.
+    fireEvent.click(screen.getByRole("button", { name: /Release plan/ }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search todos" }), {
+      target: { value: "triage" },
+    });
+    expect(screen.queryByText("Ship the release")).toBeNull();
+
+    rerender(
+      <TodoBoard
+        project={1}
+        todos={todos}
+        agents={[]}
+        scratchpads={[pad]}
+        focusId={1}
+        focusNonce={1}
+      />,
+    );
+
+    const row = document.querySelector('[data-todo-id="1"] [data-todo-trigger]');
+    expect(document.activeElement).toBe(row);
+    expect(screen.getByText("Ship the release")).toBeTruthy();
   });
 });

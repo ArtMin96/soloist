@@ -4,13 +4,13 @@ import { WAIT } from "../harness/waits.js";
 import { waitUntilOr } from "../harness/waitUntilOr.js";
 
 // The to-do board: the project's shared work items, each a Collapsible row expanding to its
-// document, blockers, comments, and actions. Selectors live only here. State (the declared status
-// label and the derived blocked gate) is read from the always-visible trigger; actions and the
-// expanded content (Complete, the refusal alert, comments) need the row expanded first.
+// document, blockers, comments, and actions. Selectors live only here, addressed by the row's
+// `data-todo-*` handles rather than DOM position — the trigger and, on a locked row, the agent
+// control are siblings, so neither structure nor styling can move a handle out from under this
+// file.
 //
-// A todo row has no accessible name distinct from its title, so it is found by the exact text of its
-// title span — the same justified structural handle the sidebar uses for a process row. The trigger
-// is anchored as the Collapsible button (`aria-expanded`), which the item uniquely carries.
+// A row is found by the exact text of its title (`data-todo-title`), the same justified structural
+// handle the sidebar uses for a process row.
 
 /** The status labels the board renders (the single source is the UI's `lib/todo` TODO_STATUS map). */
 const STATUS_LABEL: Record<TodoStatus, string> = {
@@ -20,10 +20,28 @@ const STATUS_LABEL: Record<TodoStatus, string> = {
   done: "Done",
 };
 
-/** One todo row's readable state: its declared status label and whether the blocked gate shows. */
+/** The agent control a locked row carries: who it names, and the process it opens. */
+interface TodoLock {
+  owner: string;
+  process: number;
+}
+
+/**
+ * One todo row's readable state: the id the core assigned it, its declared status, whether the
+ * blocked gate shows, and the lock the core reports (or `null` while it is unlocked).
+ */
 interface TodoState {
+  id: number;
   status: string;
   blocked: boolean;
+  lock: TodoLock | null;
+}
+
+/** How wide one box's content is against how wide the box is — a horizontal-fit reading. */
+interface FitReading {
+  what: string;
+  scrollWidth: number;
+  clientWidth: number;
 }
 
 /** The board and its rows. */
@@ -35,36 +53,51 @@ export const todoBoard = {
    */
   async read(title: string): Promise<TodoState | null> {
     return browser.execute((todoTitle: string) => {
-      // The row's trigger is the Collapsible button whose first plain span (no badge marker) is the
-      // title; the last plain span is the declared status label. The derived blocked gate is an
-      // outline badge, distinct from the muted lock badge and from the status label.
-      const triggers = [...document.querySelectorAll("button[aria-expanded]")];
-      for (const trigger of triggers) {
-        const plain = [...trigger.children].filter(
-          (child) =>
-            child.tagName === "SPAN" && !child.hasAttribute("data-slot"),
-        );
-        if (plain[0]?.textContent?.trim() !== todoTitle) continue;
-        return {
-          status: plain[plain.length - 1]?.textContent?.trim() ?? "",
-          blocked:
-            trigger.querySelector(
-              '[data-slot="badge"][data-variant="outline"]',
-            ) !== null,
-        };
-      }
-      return null;
+      const item = [...document.querySelectorAll("[data-todo-id]")].find(
+        (candidate) => candidate.querySelector("[data-todo-title]")?.textContent?.trim() === todoTitle,
+      );
+      if (!item) return null;
+      const status = item.querySelector("[data-todo-status]");
+      const agent = item.querySelector("[data-todo-agent]");
+      return {
+        id: Number(item.getAttribute("data-todo-id")),
+        status: status?.getAttribute("data-status") ?? "",
+        blocked: item.querySelector("[data-todo-blockers]") !== null,
+        lock:
+          agent === null
+            ? null
+            : {
+                owner: agent.textContent?.trim() ?? "",
+                process: Number(agent.getAttribute("data-process-id")),
+              },
+      };
     }, title);
   },
 
-  /** The row's declared status as the domain enum, mapped back from its rendered label. */
+  /**
+   * Waits until the row titled `title` carries its agent control — rendered only once the core
+   * reports the todo locked — and returns who it names and which process it opens.
+   */
+  async waitForLock(title: string): Promise<TodoLock> {
+    let lock: TodoLock | null | undefined;
+    await waitUntilOr(
+      async () => {
+        lock = (await this.read(title))?.lock;
+        return lock != null;
+      },
+      () =>
+        `todo "${title}" never showed an agent control; last seen: ${
+          lock === undefined ? "no such todo" : "unlocked"
+        }`,
+    );
+    return lock as TodoLock;
+  },
+
+  /** The row's declared status as the domain enum — read directly off `data-status`. */
   async status(title: string): Promise<TodoStatus | null> {
     const state = await this.read(title);
     if (state === null) return null;
-    const entry = (Object.entries(STATUS_LABEL) as [TodoStatus, string][]).find(
-      ([, label]) => label === state.status,
-    );
-    return entry?.[0] ?? null;
+    return (state.status as TodoStatus) || null;
   },
 
   /** Waits until a row titled `title` is rendered. */
@@ -79,32 +112,22 @@ export const todoBoard = {
   /** Every rendered todo title, for reporting a miss. */
   async titles(): Promise<string[]> {
     return browser.execute(() =>
-      [...document.querySelectorAll("button[aria-expanded]")]
-        .map((trigger) => {
-          const plain = [...trigger.children].filter(
-            (child) =>
-              child.tagName === "SPAN" && !child.hasAttribute("data-slot"),
-          );
-          // Only rows carrying a declared status label (two plain spans) are todos.
-          return plain.length >= 2
-            ? (plain[0].textContent?.trim() ?? "")
-            : null;
-        })
-        .filter((title): title is string => title !== null),
+      [...document.querySelectorAll("[data-todo-title]")].map(
+        (title) => title.textContent?.trim() ?? "",
+      ),
     );
   },
 
   /** Waits until the row titled `title` reports the declared `status`. */
   async waitForStatus(title: string, status: TodoStatus): Promise<void> {
-    const want = STATUS_LABEL[status];
     let last: string | undefined;
     await waitUntilOr(
       async () => {
         last = (await this.read(title))?.status;
-        return last === want;
+        return last === status;
       },
       () =>
-        `todo "${title}" never reported status "${want}"; last seen: ${last ?? "no such todo"}`,
+        `todo "${title}" never reported status "${status}"; last seen: ${last ?? "no such todo"}`,
     );
   },
 
@@ -136,6 +159,44 @@ export const todoBoard = {
     );
   },
 
+  /** Whether the row titled `title` is currently expanded. */
+  async isExpanded(title: string): Promise<boolean> {
+    return (await this.trigger(title).getAttribute("aria-expanded")) === "true";
+  },
+
+  /** Activates the row's agent control — the way a user opens the agent that locked it. */
+  async openAgent(title: string): Promise<void> {
+    const control = this.agentControl(title);
+    await control.waitForClickable({ timeout: WAIT.render });
+    await control.click();
+  },
+
+  /**
+   * The board's horizontal fit, read in one layout pass: its toolbar and the scroll container the
+   * rows live in, each with its content width against its own. A box whose content is wider than
+   * itself is one the user would have to scroll sideways. The rows are measured through their
+   * scroll container rather than one by one: a truncated title clips on purpose, and counting each
+   * row would report the ellipsis as a defect.
+   */
+  async horizontalOverflow(): Promise<FitReading[]> {
+    return browser.execute(() => {
+      const fit = (what: string, box: Element | null) =>
+        box === null
+          ? []
+          : [{ what, scrollWidth: box.scrollWidth, clientWidth: box.clientWidth }];
+      // The board's own scroll container: the nearest ancestor of a row that actually scrolls,
+      // past a group's clipping wrapper (which hides overflow to animate its disclosure).
+      let scroller: Element | null = document.querySelector("[data-todo-id]");
+      while (scroller && !/^(auto|scroll)$/.test(getComputedStyle(scroller).overflowX)) {
+        scroller = scroller.parentElement;
+      }
+      return [
+        ...fit("toolbar", document.querySelector("[data-todo-toolbar]")),
+        ...fit("rows", scroller),
+      ];
+    });
+  },
+
   /** Expands the row and clicks its Complete action — the write that routes to the core's gate. */
   async complete(title: string): Promise<void> {
     await this.expand(title);
@@ -161,18 +222,38 @@ export const todoBoard = {
     return this.itemElement(title).getText();
   },
 
+  /** The `#<id>` text a row carries, read off its exact title. */
+  async todoRef(title: string): Promise<string> {
+    return this.itemElement(title).$("[data-todo-ref]").getText();
+  },
+
+  /** The unmet-blocker text a row carries (`"1 unmet blocker"` / `"<n> unmet blockers"`), or null. */
+  async blockerText(title: string): Promise<string | null> {
+    const el = this.itemElement(title).$("[data-todo-blockers]");
+    if (!(await el.isExisting())) return null;
+    return el.getText();
+  },
+
   /**
-   * The row element itself, found by the exact text of its title span (the justified structural
-   * handle, as in the sidebar), anchored on the Collapsible trigger the item uniquely carries.
+   * The row element itself, found by the exact text of its title (the justified structural handle,
+   * as in the sidebar), anchored on the `data-todo-id` list item the item uniquely carries.
    */
   itemElement(title: string) {
     return $(
-      `//li[.//button[@aria-expanded][.//span[normalize-space(text())="${title}"]]]`,
+      `//li[@data-todo-id][.//*[@data-todo-title][normalize-space(text())="${title}"]]`,
     );
   },
 
-  /** The row's Collapsible trigger — the only `aria-expanded` button within the item. */
+  /** The row's Collapsible trigger. */
   trigger(title: string) {
-    return this.itemElement(title).$("button[aria-expanded]");
+    return this.itemElement(title).$("[data-todo-trigger]");
+  },
+
+  /**
+   * The row's agent control — present only while it is locked. A sibling of the trigger, never a
+   * descendant, so activating it never also toggles the row.
+   */
+  agentControl(title: string) {
+    return this.itemElement(title).$("[data-todo-agent]");
   },
 };

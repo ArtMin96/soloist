@@ -1,11 +1,8 @@
-import { useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { TodoCreateForm } from "@/components/orchestration/TodoCreateForm";
-import { TodoFilters } from "@/components/orchestration/TodoFilters";
 import { TodoGroup } from "@/components/orchestration/TodoGroup";
 import { TodoItem, type TodoEditState } from "@/components/orchestration/TodoItem";
-import { SegmentedControl } from "@/components/SegmentedControl";
-import { Button } from "@/components/ui/button";
+import { TodoToolbar } from "@/components/orchestration/TodoToolbar";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { useCollapseState } from "@/store/useCollapseState";
 import { useTodoActions } from "@/store/useTodoActions";
@@ -18,16 +15,8 @@ import {
   todoTags,
   type TodoFilter,
 } from "@/store/todoFilter";
-import type { Option } from "@/lib/appearance";
+import type { BoardView } from "@/lib/todo";
 import type { AgentNode, ScratchpadSummary, TodoView } from "@/domain";
-
-/** How the board arranges its rows. Grouped is the default — most work comes out of a document. */
-type BoardView = "grouped" | "all";
-
-const BOARD_VIEWS: Option<BoardView>[] = [
-  { value: "all", label: "All" },
-  { value: "grouped", label: "By scratchpad" },
-];
 
 /** Namespaces this board's persisted collapse keys so they cannot collide with the sidebar's. */
 const COLLAPSE_PREFIX = "todos.scratchpad";
@@ -50,11 +39,20 @@ export function TodoBoard({
   todos,
   agents,
   scratchpads,
+  onOpenAgent,
+  focusId,
+  focusNonce,
 }: {
   project: number;
   todos: TodoView[];
   agents: AgentNode[];
   scratchpads: ScratchpadSummary[];
+  /** Opens the agent a row is locked by — absent when the caller offers no navigation. */
+  onOpenAgent?: (process: number) => void;
+  /** The todo to expand and focus when `focusNonce` changes — cross-surface navigation, inbound. */
+  focusId?: number;
+  /** Bumped to re-trigger the focus above, even to repeat the same `focusId`. */
+  focusNonce?: number;
 }) {
   const actions = useTodoActions(project);
   const editor = useTodoEditor(project);
@@ -85,6 +83,52 @@ export function TodoBoard({
     });
   };
 
+  // Whether the focus target has actually arrived in the live snapshot. Coming from a freshly
+  // mounted pane, `focusNonce` can be set before the first snapshot lands — `targetPresent`
+  // gates the reveal below on that, and its own presence in the effect's deps is what makes the
+  // reveal retry once the todo shows up, rather than silently missing it.
+  const targetPresent = focusId != null && todos.some((todo) => todo.id === focusId);
+  const revealedNonceRef = useRef<number | undefined>(undefined);
+  const pendingFocusRef = useRef<{ nonce: number; id: number } | null>(null);
+
+  // Cross-surface navigation's inbound half, step one: once the target row exists, clear a
+  // filter that hides it and expand its scratchpad group if the board is grouped and it is
+  // collapsed, then hand off to the effect below — a collapsed Radix panel keeps its content
+  // mounted but `hidden`, so focusing it only works once it opens.
+  useEffect(() => {
+    if (focusId == null || focusNonce == null || !targetPresent) return;
+    if (revealedNonceRef.current === focusNonce) return;
+    revealedNonceRef.current = focusNonce;
+
+    setOpenId(focusId);
+    if (!visible.some((todo) => todo.id === focusId)) setFilter(EMPTY_TODO_FILTER);
+    const group = groupTodosByScratchpad(todos).find((candidate) =>
+      candidate.todos.some((todo) => todo.id === focusId),
+    );
+    if (group) setCollapsed(`${COLLAPSE_PREFIX}.${group.key}`, false);
+
+    pendingFocusRef.current = { nonce: focusNonce, id: focusId };
+    // Only the reveal's own trigger conditions belong here — `visible`/`todos`/`collapsed` are
+    // read for their value at reveal time, not to re-run the reveal when they later change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusNonce, focusId, targetPresent]);
+
+  // Step two: moves DOM focus once the trigger the step above revealed actually mounts —
+  // retried on every render (no deps array) until it does, then self-clears. Queried by the
+  // same `data-todo-*` handles the e2e layer uses, rather than threading a ref through the
+  // Collapsible wrapper.
+  useEffect(() => {
+    const pending = pendingFocusRef.current;
+    if (pending == null) return;
+    const trigger = document.querySelector<HTMLElement>(
+      `[data-todo-id="${pending.id}"] [data-todo-trigger]`,
+    );
+    if (trigger == null) return;
+    trigger.scrollIntoView({ block: "nearest" });
+    trigger.focus();
+    pendingFocusRef.current = null;
+  });
+
   // The edit surface for one row, present only while it is the one being edited. A concurrent write
   // that moves the live todo past the opened revision is the conflict the editor pauses on.
   const editStateFor = (todo: TodoView): TodoEditState | null => {
@@ -108,7 +152,7 @@ export function TodoBoard({
   };
 
   const row = (todo: TodoView) => (
-    <li key={todo.id}>
+    <li key={todo.id} data-todo-id={todo.id}>
       <TodoItem
         todo={todo}
         open={openId === todo.id}
@@ -121,6 +165,7 @@ export function TodoBoard({
         onCopyLink={() => actions.copyLink(todo.id)}
         onComment={(body) => actions.comment(todo.id, body)}
         onStartEdit={() => editor.editTodo(todo)}
+        onOpenAgent={onOpenAgent}
         showScratchpad={!grouped}
         scratchpads={scratchpads}
         edit={editStateFor(todo)}
@@ -131,28 +176,19 @@ export function TodoBoard({
   // The board's one accent-filled default action — and only while there is no form open, since the
   // form's own Create is then the default and two filled buttons would each claim to be it.
   const creating = editor.mode === "create";
-  const newTodo = (
-    <Button size="sm" onClick={startCreate} className="shrink-0">
-      <Plus aria-hidden /> New todo
-    </Button>
-  );
 
   return (
     <div className="flex h-full min-h-0 flex-col tracking-[var(--tracking-body)]">
-      <div className="flex shrink-0 flex-col gap-1.5 border-b p-2">
-        <TodoFilters
-          filter={filter}
-          tags={tags}
-          onChange={setFilter}
-          trailing={creating ? undefined : newTodo}
-        />
-        <SegmentedControl<BoardView>
-          value={view}
-          options={BOARD_VIEWS}
-          onChange={setView}
-          ariaLabel="Group todos"
-        />
-      </div>
+      <TodoToolbar
+        filter={filter}
+        tags={tags}
+        onChange={setFilter}
+        view={view}
+        onViewChange={setView}
+        shown={visible.length}
+        total={todos.length}
+        onCreate={creating ? undefined : startCreate}
+      />
 
       {creating && editor.initial && (
         <TodoCreateForm

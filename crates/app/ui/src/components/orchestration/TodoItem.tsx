@@ -1,13 +1,13 @@
-import { ChevronRight, Link2, Lock, Pencil } from "lucide-react";
+import { ChevronRight, Link2, Lock, MessageSquareIcon, Pencil } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { MarkdownView } from "@/components/editor/MarkdownView";
 import { CommentComposer } from "@/components/orchestration/CommentComposer";
 import { CommentList } from "@/components/orchestration/CommentList";
+import { TagList } from "@/components/orchestration/TagList";
 import { TodoEditor, type TodoConflict } from "@/components/orchestration/TodoEditor";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { humanizeName } from "@/lib/humanize";
-import { TODO_STATUS } from "@/lib/todo";
+import { TODO_STATUS, TODO_STATUS_ICON, unmetBlockerLabel } from "@/lib/todo";
 import { cn } from "@/lib/utils";
 import type { SaveOutcome } from "@/store/saveOutcome";
 import type { ScratchpadSummary, TodoDoc, TodoView } from "@/domain";
@@ -26,6 +26,70 @@ export interface TodoEditState {
   onDone: () => void;
 }
 
+interface TodoRowMetaProps {
+  todo: TodoView;
+  done: boolean;
+  showScratchpad: boolean;
+}
+
+// The trigger's passive info — id, title, status, the unmet-blocker count, the scratchpad, tags,
+// and the comment count — split out so `TodoItem` itself only has to reason about the row's
+// interactive structure (the trigger/agent-control split, the read/edit swap), not every optional
+// span this declares.
+function TodoRowMeta({ todo, done, showScratchpad }: TodoRowMetaProps) {
+  const StatusIcon = TODO_STATUS_ICON[todo.doc.status];
+  return (
+    <>
+      <span data-todo-ref className="type-label shrink-0 text-muted-foreground">
+        #{todo.id}
+      </span>
+      <span
+        data-todo-title
+        className={cn(
+          "min-w-0 flex-1 truncate text-[0.8125rem] leading-4",
+          done ? "text-muted-foreground line-through" : "text-foreground",
+        )}
+      >
+        {todo.doc.title}
+      </span>
+      <span
+        data-todo-status
+        data-status={todo.doc.status}
+        className="type-label flex min-w-0 shrink items-center gap-1 text-muted-foreground"
+      >
+        <StatusIcon aria-hidden className="size-3.5 shrink-0" />
+        <span className="min-w-0 truncate">{TODO_STATUS[todo.doc.status]}</span>
+      </span>
+      {todo.blocked_by.length > 0 && (
+        <span
+          data-todo-blockers
+          className="type-label min-w-0 shrink truncate text-muted-foreground"
+        >
+          {unmetBlockerLabel(todo.blocked_by.length)}
+        </span>
+      )}
+      {showScratchpad && todo.scratchpad && (
+        <span
+          data-todo-scratchpad
+          className="type-label min-w-0 shrink truncate text-muted-foreground"
+        >
+          {humanizeName(todo.scratchpad.name)}
+        </span>
+      )}
+      <TagList tags={todo.tags} />
+      {todo.comments.length > 0 && (
+        <span
+          data-todo-comments
+          className="type-label flex shrink-0 items-center gap-1 text-muted-foreground"
+        >
+          <MessageSquareIcon aria-hidden className="size-3" />
+          {todo.comments.length}
+        </span>
+      )}
+    </>
+  );
+}
+
 interface TodoItemProps {
   todo: TodoView;
   open: boolean;
@@ -38,6 +102,11 @@ interface TodoItemProps {
   onCopyLink: () => void;
   onComment: (body: string) => Promise<void>;
   onStartEdit: () => void;
+  /**
+   * Opens the agent this row is locked by. Absent when the caller offers no navigation — the
+   * control still renders, but disabled, rather than disappearing and shifting the row.
+   */
+  onOpenAgent?: (process: number) => void;
   /**
    * Whether the row names the scratchpad it derives from. False while the board groups by
    * scratchpad, where the group header already says it and repeating it on every row would be
@@ -68,6 +137,7 @@ export function TodoItem({
   onCopyLink,
   onComment,
   onStartEdit,
+  onOpenAgent,
   showScratchpad,
   scratchpads,
   edit,
@@ -83,42 +153,37 @@ export function TodoItem({
       onOpenChange={onToggle}
       className="rounded-md data-[state=open]:bg-muted/40"
     >
-      <CollapsibleTrigger className="flex min-h-7 w-full items-center gap-2 rounded-md px-2 py-1 text-left outline-none hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring">
-        <ChevronRight
-          aria-hidden
-          className={cn(
-            "size-3.5 shrink-0 text-muted-foreground transition-transform duration-[var(--dur-control)] ease-spring-settle",
-            open && "rotate-90",
-          )}
-        />
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate text-[0.8125rem] leading-4",
-            done ? "text-muted-foreground line-through" : "text-foreground",
-          )}
+      {/* The trigger and the agent control are siblings, not nested — a lock never buries an
+          interactive control inside another one, so each is its own tab stop. */}
+      <div className="flex items-center gap-1 pr-1">
+        <CollapsibleTrigger
+          data-todo-trigger
+          className="flex min-h-7 min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-md px-2 py-1 text-left outline-none hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring"
         >
-          {todo.doc.title}
-        </span>
-        {showScratchpad && todo.scratchpad && (
-          <span className="type-label min-w-0 shrink truncate text-muted-foreground">
-            {humanizeName(todo.scratchpad.name)}
-          </span>
-        )}
-        {todo.blocked && (
-          <Badge variant="outline" className="shrink-0">
-            Blocked
-          </Badge>
-        )}
+          <ChevronRight
+            aria-hidden
+            className={cn(
+              "size-3.5 shrink-0 text-muted-foreground transition-transform duration-[var(--dur-control)] ease-spring-settle",
+              open && "rotate-90",
+            )}
+          />
+          <TodoRowMeta todo={todo} done={done} showScratchpad={showScratchpad} />
+        </CollapsibleTrigger>
         {todo.locked_by != null && (
-          <Badge variant="muted" className="shrink-0 gap-1">
+          <Button
+            data-todo-agent
+            data-process-id={todo.locked_by}
+            variant="ghost"
+            size="sm"
+            disabled={onOpenAgent == null}
+            onClick={() => onOpenAgent?.(todo.locked_by as number)}
+            className="shrink-0 gap-1"
+          >
             <Lock aria-hidden className="size-3" />
             {lockOwnerLabel ?? `#${todo.locked_by}`}
-          </Badge>
+          </Button>
         )}
-        <span className="type-label shrink-0 text-muted-foreground">
-          {TODO_STATUS[todo.doc.status]}
-        </span>
-      </CollapsibleTrigger>
+      </div>
 
       {/* Indented to the row's title, so the document reads as belonging to the row above it. */}
       <CollapsibleContent className="flex flex-col gap-3 pt-1 pr-2 pb-3 pl-8 text-[0.8125rem]">

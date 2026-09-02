@@ -1,5 +1,6 @@
 import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { DocumentKind } from "@/components/orchestration/DocumentTitle";
+import { TagList } from "@/components/orchestration/TagList";
 import { humanizeName } from "@/lib/humanize";
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
 import { cn } from "@/lib/utils";
@@ -10,6 +11,7 @@ export interface DocumentRow {
   name: string;
   revision: number;
   gist: string;
+  tags: string[];
 }
 
 /** The DOM handle attribute each document kind's rows are stamped with — the single source an e2e
@@ -140,6 +142,7 @@ export function DocumentList<Row extends DocumentRow>({
               <span className="min-w-0 flex-1 truncate text-[0.8125rem] leading-4 text-foreground">
                 {humanizeName(item.name)}
               </span>
+              <TagList tags={item.tags} className="shrink" />
               <span className="type-label shrink-0 font-mono tabular-nums text-muted-foreground">
                 r{item.revision}
               </span>
