@@ -239,6 +239,31 @@ Surgical because no other spec writes a scratchpad, completes a todo, or creates
 paths are coordination-only. Each mutation reddened exactly one assertion; `git diff --stat crates/` showed
 none of the three files after restore.
 
+The todo-workspace walk (`specs/coordination/todo-workspace.spec.ts`) drives the board rows, the locked row's agent
+control, and the agent terminal header's session-work context against the same bound lead, whose coordination arm
+was extended to `todo_lock` / `todo_get` / `scratchpad_read` so "Current work" and "This session" are what the core
+recorded from real tool calls. Its first run caught the walk's own pretend assertion before it caught anything in
+the product: stopping the only process navigates the window to the start surface, so an "empty" read of the lead's
+header was a read of no pane at all and the clear-on-stop assertion passed vacuously — the mutation below stayed
+green until the read was made to report "no pane visible" as distinct from "nothing shown", and the walk re-opened
+the stopped lead's pane before asserting. Product-mutation pass, reverted byte-clean (`facade.rs` carries other
+uncommitted work, so it was restored from a byte copy and `cmp`-verified rather than checked out):
+
+| Mutation | Expected | Observed |
+|----------|----------|----------|
+| Drop `session_activity.clone()` from the `CompositeLockReleaser` in `Facade::new` (`crates/core/src/facade.rs`) — a closing process's per-run record is never forgotten | only "empties the lead's session context when the lead stops" fails | exactly that, once the read was honest: `the visible agent's session-work context never cleared; last read: {"currentTodos":[],"sessionScratchpads":[],"sessionTodos":[1,2,3]}` — the lock had released (current work empty) but the recorded todos still rendered under "This session". The walk's other assertions (row id/status/blocker counts, the lock's owner and process id, the header's current/session lists, both inbound navigations) held; the min-width one was red for its own unrelated reason in that run (the product defects the walk caught, fixed since) |
+
+Surgical because only this walk reads the session-work header, and nothing in any cleanup path depends on the
+record being forgotten. One walk point was **pulled as harness-blocked**: keyboard traversal of a row (Tab from the
+trigger to the agent control, each with a visible ring). The embedded WebDriver plugin dispatches key actions as
+synthesized `KeyboardEvent`s on the active element (`tauri-plugin-wdio-webdriver` `platform/executor.rs`), and an
+untrusted keydown never runs the engine's default action, so a Tab cannot move focus and `:focus-visible` cannot be
+produced — observed: after `keys("Tab")` focus was still on the trigger. That the two controls are separate,
+non-nested focusables stays a jsdom question (`TodoItem.test.tsx`). The minimum-width assertion is scoped to the board's
+own surface (`[data-todo-toolbar]` and the rows' scroll container): the orchestration pane's six-segment view switch
+overflowing a 184px pane (`scrollWidth 485 / clientWidth 184` at 720px with the git rail open) is a pre-existing limit
+of a control this feature did not touch, recorded as a follow-up rather than asserted here.
+
 The addressed-agent-messaging walk (`specs/orchestration/agent-messaging.spec.ts`) reuses the bound lead
 fixture with two spawned fixture workers. Its source proof contrasts the wire default with an explicit
 opt-out: the primary serializes `include_agent_instructions: true`, which the protocol omits on the wire,
