@@ -53,6 +53,7 @@ function CommentBody({ comment }: { comment: Comment }) {
         key={`${comment.id}:${comment.body}`}
         markdown={comment.body}
         ariaLabel={`Comment from ${commentAuthorLabel(comment.author)}`}
+        fallback={null}
       />
     </div>
   );

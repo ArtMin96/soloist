@@ -57,7 +57,7 @@ export function OrchestrationPane({
           {project.icon && <AvatarImage src={project.icon} alt="" />}
           <AvatarFallback>{monogram(project.name)}</AvatarFallback>
         </Avatar>
-        <span className="min-w-0 shrink truncate text-[0.9375rem] font-[550] tracking-[var(--tracking-title)]">
+        <span className="type-title min-w-0 shrink truncate font-[550] tracking-[var(--tracking-title)]">
           {project.name}
         </span>
         <div className="ml-auto shrink-0">

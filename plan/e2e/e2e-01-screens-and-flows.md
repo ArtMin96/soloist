@@ -264,6 +264,52 @@ own surface (`[data-todo-toolbar]` and the rows' scroll container): the orchestr
 overflowing a 184px pane (`scrollWidth 485 / clientWidth 184` at 720px with the git rail open) is a pre-existing limit
 of a control this feature did not touch, recorded as a follow-up rather than asserted here.
 
+**Reconciled when the board became master–detail.** The row's inline expansion was replaced by a detail panel
+sliding in beside the list, which moved Complete, the refusal alert, the comment thread and a todo's provenance
+out of the `<li data-todo-id>` the screen object read everything through. Four points are worth keeping:
+
+- **Panel membership proves nothing.** Both panels stay mounted for the whole movement, so
+  `[data-todo-panel="detail"]` existing is *always* true and an assertion on it would be a pretend test. The
+  viewport's `data-todo-route` is the only honest read of which panel the user is on, and `[data-todo-detail]`
+  now carries the open todo's id, so identity is a named handle rather than a heading's text.
+- **The board is read atomically.** A route change swaps both panels' `inert` and moves focus in one commit;
+  `todoBoard.view()` takes route, open todo and `document.activeElement` in a single `browser.execute` for the
+  same reason `sidebar.rows()` does — separate reads can catch a state the app never actually showed.
+- **`focusedTodoId`/`waitForFocusedTodo` moved from `orchestrationPane` to `todoBoard`.** A todo row's focus is
+  the board's fact, and `[data-todo-id]` may not be a selector in two screens.
+- **Row-level expansion was deleted, not reworded.** `isExpanded(...) === true` no longer describes anything a
+  user can do; it is replaced by "the detail panel is open on that todo, with focus on Back".
+
+**The reconciliation found a defect no headless test could.** `TodoPanels` dropped the panel it had retained for
+the slide on `transitionend`, guarded by `event.propertyName === "transform"` — but Tailwind v4's
+`-translate-x-full` compiles to the `translate` property, and `transition-transform` expands to
+`transition-property: transform, translate, scale, rotate`. Measured in the real window
+(`prefers-reduced-motion: false`, `transitionDuration: 0.3s`), the track's events were
+`["start translate self=true", …]`: the guard could never match, `onSettled` never fired, and the detail panel
+stayed mounted off-screen indefinitely. jsdom fires no transitions at all, so `TodoBoard.test.tsx` was green
+throughout. Fixed in the component; the identical guard still sits in `common/SlidingPanels.tsx`, whose unit
+test manufactures the event with `fireEvent.transitionEnd(track, { propertyName: "transform" })` and is
+therefore green against a path the browser cannot take — it must be fixed before the board is rewired onto it.
+
+| Mutation | Expected | Observed |
+|----------|----------|----------|
+| None needed for the panel drop — the assertion was written against the unfixed product | only "hands the pane to a card's detail panel, and returns to the row it came from" fails, at the drop | exactly that, twice: `the detail panel was never dropped after returning to the list; last read: {"backFocused":false,"detail":{…,"title":"Publish the release notes"},"focusedRow":2,"route":"list"}`. The route had changed and focus had returned, so the failure is pinned to the unmount alone; the walk's other eight assertions and all three `coordination-panels` assertions held. Green once the guard accepted `translate` too (`SETTLE_PROPERTIES = new Set(["transform", "translate"])`, `event.target === event.currentTarget` intact) — a real before/after rather than a synthetic mutation |
+| Drop the `scratchpad: Some(…)` link the lead makes over the wire (`fixtures/lead-agent/src/coordination.rs`) — the todo derives from no document | only the detail panel's provenance assertion fails | exactly that: `Expected: "release-readiness", Received: "not-derived-from-a-scratchpad"` — the field fell back to its empty state, so the name can only have come from the core carrying the agent's link |
+| Delete the `pendingFocusRef.current = { panel: "detail", … }` assignment in `openDetail` (`TodoBoard.tsx`) — opening a panel no longer moves focus into it | only the two `backFocused` assertions fail | exactly that: `Expected: true, Received: false` in "hands the pane to a card's detail panel…" and in "returns from a current-work item…". The other seven held, including both minimum-width readings |
+| Point `back()`'s focus target at a handle that matches nothing (`TodoBoard.tsx`) — returning parks focus on the panel instead of the row | only `waitForFocusedRow` fails | exactly that: `focus never landed on todo 2; last focused todo: none` — `focusPanel` fell back to the panel root, so focus moved but not onto a row. Eight of nine passed, `backFocused` among them: the two focus moves are proven independent |
+
+Both `TodoBoard.tsx` mutations were restored by byte copy and verified with `sha256sum -c` (never `git checkout --`:
+nothing in that refactor is committed, so a checkout would revert to HEAD and destroy it). The restore is guarded —
+it re-checks that the file still matches the *mutated* hash before overwriting, so a concurrent edit is refused
+rather than clobbered.
+
+**The first mutation also caught a fragility in the walk itself.** With the detail panel left open by the failing
+assertion, the *next* test could not click a row's agent control (`element ("[data-todo-agent]") still not
+clickable after 10000ms`) and three tests cascaded — not because of the product, but because the list panel is
+`inert` and off the track while the detail shows. `todoBoard.showList()` now precedes anything that *acts* on a
+row, the same discipline `open()` already had; reads need no such thing, since the off-screen panel stays mounted
+and live. Re-running the later mutations confirmed the cascade was gone: each reddened only its own assertions.
+
 The addressed-agent-messaging walk (`specs/orchestration/agent-messaging.spec.ts`) reuses the bound lead
 fixture with two spawned fixture workers. Its source proof contrasts the wire default with an explicit
 opt-out: the primary serializes `include_agent_instructions: true`, which the protocol omits on the wire,

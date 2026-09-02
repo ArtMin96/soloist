@@ -235,23 +235,36 @@ function hueFrom(reference: string, hue: number, lightnessShift = 0): string {
   return hex((r + match) * 255, (g + match) * 255, (b + match) * 255);
 }
 
+/**
+ * Every ground a status, git or file mark can land on. The rail these were first drawn for is only
+ * part of it: the same tokens carry a todo's status badge and blocker shield, agent activity, and
+ * git file colours, all of which sit in the content pane. Clamping against the sidebar alone lets a
+ * theme pass while being unreadable on a card, so the guard and the clamp read this one list.
+ */
+export function markBackgrounds(colors: ThemeColors): string[] {
+  return [
+    colors.sidebar,
+    colors.sidebarRowHover,
+    colors.sidebarRowActive,
+    colors.sidebarRowSelected,
+    colors.surface,
+    colors.surfaceRaised,
+    colors.muted,
+  ];
+}
+
 export function deriveThemeExtensions(
   colors: ThemeColors,
   appearance: ThemeAppearance,
   explicit: Partial<SoloistThemeExtensions> = {},
 ): ThemeExtensions {
-  const railBackgrounds = [
-    colors.sidebar,
-    colors.sidebarRowHover,
-    colors.sidebarRowActive,
-    colors.sidebarRowSelected,
-  ];
+  const backgrounds = markBackgrounds(colors);
   const statusColor = (color: string) =>
-    ensureThemeContrast(color, railBackgrounds, 3, colors.sidebarForeground);
+    ensureThemeContrast(color, backgrounds, 3, colors.sidebarForeground);
   const gitColor = (color: string) =>
-    ensureThemeContrast(color, railBackgrounds, 4.5, colors.sidebarForeground);
+    ensureThemeContrast(color, backgrounds, 4.5, colors.sidebarForeground);
   const fileColor = (color: string) =>
-    ensureThemeContrast(color, railBackgrounds, 3, colors.sidebarForeground);
+    ensureThemeContrast(color, backgrounds, 3, colors.sidebarForeground);
   const statusRunning = statusColor(
     hueFrom(colors.accent, 145, appearance === "dark" ? 0.04 : -0.05),
   );

@@ -1,7 +1,5 @@
 import { useRef, useState } from "react";
-import { Check } from "lucide-react";
 import { RevisionConflictNotice } from "@/components/RevisionConflictNotice";
-import { Button } from "@/components/ui/button";
 import { TodoDocFields } from "@/components/orchestration/TodoDocFields";
 import { useAutosave } from "@/components/editor/useAutosave";
 import type { SaveOutcome } from "@/store/saveOutcome";
@@ -26,13 +24,13 @@ interface TodoEditorProps {
   onSave: (doc: TodoDoc, scratchpad: number | null) => Promise<SaveOutcome>;
   /** Reload the todo fresh, adopting the concurrent write and discarding local edits. */
   onReload: () => void;
-  /** Leave edit mode (edits already autosaved). */
-  onDone: () => void;
 }
 
-// The inline edit surface for one todo: the title/body/status fields plus their autosave. Edits
-// stream out as the whole document and are debounced by `useAutosave`, flushing on blur, Cmd/Ctrl+S,
-// Done, or unmount — never echoed back into the editor, so the caret never jumps. A stale save is
+// The edit surface for one todo: the title/body/status fields plus their autosave. Edits stream out
+// as the whole document and are debounced by `useAutosave`, flushing on blur, Cmd/Ctrl+S, or unmount
+// — never echoed back into the editor, so the caret never jumps. Leaving edit mode is the header's
+// Done, which unmounts this component; the unmount flush is what persists the last keystrokes, so
+// this surface needs no exit control of its own. A stale save is
 // refused by the core's revision guard; the board detects that from the live revision and passes a
 // `conflict`, which pauses autosave and offers a Reload (nothing was overwritten). The parent keys
 // this component by the editor's mount key, so a reload remounts it with fresh content and a clean
@@ -45,7 +43,6 @@ export function TodoEditor({
   error,
   onSave,
   onReload,
-  onDone,
 }: TodoEditorProps) {
   const [title, setTitle] = useState(initial.title);
   const [status, setStatus] = useState<TodoStatus>(initial.status);
@@ -55,11 +52,6 @@ export function TodoEditor({
     onSave: (body: string) => onSave({ title, body, status }, scratchpad),
     paused: conflict != null,
   });
-
-  const done = () => {
-    autosave.flush();
-    onDone();
-  };
 
   const statusLabel = autosave.saving ? "Saving…" : autosave.dirty ? "Unsaved changes" : "Saved";
 
@@ -102,7 +94,7 @@ export function TodoEditor({
         onBlur={autosave.flush}
       />
 
-      <footer className="flex items-center gap-3">
+      <footer className="flex items-center">
         <span
           className="type-label text-muted-foreground"
           aria-live="polite"
@@ -110,10 +102,6 @@ export function TodoEditor({
         >
           {statusLabel}
         </span>
-        <div className="flex-1" />
-        <Button size="sm" onClick={done} data-todo-done>
-          <Check aria-hidden /> Done
-        </Button>
       </footer>
     </div>
   );

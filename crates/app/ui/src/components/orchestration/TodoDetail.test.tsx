@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { DETAIL_MEASURE } from "@/components/orchestration/DetailPaneHeader";
 import { TodoDetail, type TodoEditState } from "@/components/orchestration/TodoDetail";
 import { TODO_STATUS, TODO_STATUS_ORDER, TODO_STATUS_TONE } from "@/lib/todo";
 import type { ScratchpadRef, TodoStatus, TodoView } from "@/domain";
@@ -87,6 +88,9 @@ const panel = (overrides: Partial<Parameters<typeof TodoDetail>[0]> = {}) =>
 
 const root = () => document.querySelector("[data-todo-detail]") as HTMLElement;
 const header = () => root().querySelector(":scope > header") as HTMLElement;
+/** The header's measure column — the bands sit inside it, not directly under the header. */
+const headerBands = () => header().querySelector(":scope > div") as HTMLElement;
+const bodyColumn = () => root().querySelector(":scope > div > div") as HTMLElement;
 const statusChip = () => document.querySelector("[data-todo-status]") as HTMLElement;
 const avatars = () => [...document.querySelectorAll('[data-slot="avatar"]')] as HTMLElement[];
 const region = (name: string) => screen.getByRole("region", { name });
@@ -216,14 +220,24 @@ describe("TodoDetail", () => {
   it("aligns the header's bands by centring, never by baseline", () => {
     panel({ todo: todo({ tags: ["infra"] }) });
 
-    const rows = [...header().children] as HTMLElement[];
+    const rows = [...headerBands().children] as HTMLElement[];
     expect(rows.length).toBeGreaterThanOrEqual(3);
     for (const row of rows) {
       expect(row.className).not.toContain("items-baseline");
     }
     // The title is alone on its line, so nothing shares a row with it to disagree about.
     const title = screen.getByRole("heading", { level: 2 });
-    expect(title.parentElement).toBe(header());
+    expect(title.parentElement).toBe(headerBands());
+  });
+
+  // The pinned header and the document scrolling under it are held to one column, so they resolve
+  // to the same left edge instead of a full-bleed header sitting beside a centred body — which on a
+  // wide pane read as two unrelated layouts. They agree only while both wear the same measure.
+  it("holds the header and the scrolling body to one shared column", () => {
+    panel();
+
+    expect(headerBands().className).toContain(DETAIL_MEASURE);
+    expect(bodyColumn().className).toContain(DETAIL_MEASURE);
   });
 
   it("keeps the id, status, blocker gate and tags together in one meta rail", () => {
@@ -329,6 +343,29 @@ describe("TodoDetail", () => {
     expect(screen.queryByLabelText("Add a comment")).toBeNull();
     expect(screen.queryByRole("button", { name: "Complete" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+  });
+
+  // The defect: `Done` used to sit in a footer at the bottom of the scrolling body, so on a long
+  // todo the only way out of edit mode was off-screen while the header's right side sat empty.
+  it("keeps the way out of edit mode in the pinned header, not below the fold", () => {
+    const onDone = vi.fn();
+    panel({ edit: editState({ onDone }) });
+
+    const done = within(header()).getByRole("button", { name: "Done" });
+    // Exactly one exit control: the editor no longer draws its own.
+    expect(document.querySelectorAll("[data-todo-done]").length).toBe(1);
+    expect(done.getAttribute("data-todo-done")).not.toBeNull();
+
+    fireEvent.click(done);
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it("still reports autosave state while editing", () => {
+    panel({ edit: editState() });
+
+    const status = document.querySelector("[data-todo-autosave-status]") as HTMLElement;
+    expect(status).not.toBeNull();
+    expect(status.getAttribute("aria-live")).toBe("polite");
   });
 
   it("keeps the back control available while the todo is being edited", () => {

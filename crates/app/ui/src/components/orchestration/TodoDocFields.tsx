@@ -96,7 +96,7 @@ export function TodoDocFields({
       <div className="flex items-center gap-2">
         {/* A plain caption, not a `label`: the underlying select is named by `aria-label`, whose
             text opens with the same word, so the visible and accessible names agree. */}
-        <span className="shrink-0 text-[0.6875rem] font-[550] tracking-[var(--tracking-label)] text-muted-foreground">
+        <span className="type-label shrink-0 font-[550] tracking-[var(--tracking-label)] text-muted-foreground">
           Scratchpad
         </span>
         <NullableSelect<string>

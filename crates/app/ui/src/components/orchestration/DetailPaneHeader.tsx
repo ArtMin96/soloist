@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { cn } from "@/lib/utils";
 
 /**
  * The container this header names, so slot content can answer the pane's width rather than the
@@ -7,6 +8,14 @@ import type { ReactNode } from "react";
  * for `@max-[Nrem]/detail-header:` and not a viewport breakpoint, which would lie about the space.
  */
 export const DETAIL_HEADER_CONTAINER = "detail-header";
+
+/**
+ * The column a detail pane holds its content to. Both the pinned header and the scrolling document
+ * under it wear this, so they resolve to the same left edge at every width — on a wide pane a
+ * full-bleed header beside a centred column reads as two unrelated layouts. Defined once because
+ * the alignment only holds while both sides agree on the cap *and* the padding inside it.
+ */
+export const DETAIL_MEASURE = "mx-auto w-full max-w-3xl px-4";
 
 interface DetailPaneHeaderProps {
   /** The control that leaves this pane, set leftmost. The caller owns it, so it can carry its own
@@ -31,24 +40,29 @@ interface DetailPaneHeaderProps {
 // allowed to wrap because it is alone on its line and is the one thing a reader came for.
 export function DetailPaneHeader({ back, actions, title, meta }: DetailPaneHeaderProps) {
   return (
-    <header className="@container/detail-header flex shrink-0 flex-col gap-2 border-b px-4 pt-3 pb-2.5">
-      {(back != null || actions != null) && (
-        // `justify-between` rather than a flex spacer: a zero-width spacer is still a child and is
-        // still charged its gaps, which is what overflowed this row at a 184px pane.
-        <div className="flex h-8 items-center justify-between gap-2 overflow-hidden">
-          <div className="flex min-w-0 items-center">{back}</div>
-          <div className="flex shrink-0 items-center gap-1">{actions}</div>
-        </div>
-      )}
+    <header className="@container/detail-header flex shrink-0 flex-col border-b pt-3 pb-2.5">
+      {/* The rule spans the pane, but everything above it is held to the same measure the body
+          below it uses, so the header and the document share one left edge instead of the header
+          running full-bleed past a centred column. */}
+      <div className={cn(DETAIL_MEASURE, "flex flex-col gap-2")}>
+        {(back != null || actions != null) && (
+          // `justify-between` rather than a flex spacer: a zero-width spacer is still a child and is
+          // still charged its gaps, which is what overflowed this row at a 184px pane.
+          <div className="flex h-8 items-center justify-between gap-2 overflow-hidden">
+            <div className="flex min-w-0 items-center">{back}</div>
+            <div className="flex shrink-0 items-center gap-1">{actions}</div>
+          </div>
+        )}
 
-      {/* Wraps, and is never truncated: the list row truncates, so this is the one place a long
-          title is readable in full. It is clamped only in the narrow regime, where an unbounded
-          title would take most of a 480px-minimum window's height for a header. */}
-      <h2 className="type-title font-[560] tracking-[var(--tracking-title)] text-pretty break-words text-foreground @max-[16rem]/detail-header:line-clamp-3">
-        {title}
-      </h2>
+        {/* Wraps, and is never truncated: the list row truncates, so this is the one place a long
+            title is readable in full. It is clamped only in the narrow regime, where an unbounded
+            title would take most of a 480px-minimum window's height for a header. */}
+        <h2 className="type-title font-[560] tracking-[var(--tracking-title)] text-pretty break-words text-foreground @max-[16rem]/detail-header:line-clamp-3">
+          {title}
+        </h2>
 
-      {meta}
+        {meta}
+      </div>
     </header>
   );
 }

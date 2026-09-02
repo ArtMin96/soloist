@@ -12,7 +12,7 @@ import { Section } from "@/components/common/Section";
 import { WELL } from "@/components/common/Well";
 import { MarkdownView } from "@/components/editor/MarkdownView";
 import { CommentThread } from "@/components/orchestration/CommentThread";
-import { DetailPaneHeader } from "@/components/orchestration/DetailPaneHeader";
+import { DETAIL_MEASURE, DetailPaneHeader } from "@/components/orchestration/DetailPaneHeader";
 import { TagList } from "@/components/orchestration/TagList";
 import { TodoEditor, type TodoConflict } from "@/components/orchestration/TodoEditor";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -136,7 +136,15 @@ export function TodoDetail({
           </Button>
         }
         actions={
-          edit ? undefined : (
+          edit ? (
+            // Band 1 stays occupied in edit mode, so the way out of editing is never below the fold
+            // on a long todo. `useAutosave` commits on unmount, which this triggers, so leaving does
+            // not need an explicit flush of its own.
+            <Button size="sm" onClick={edit.onDone} data-todo-done title="Finish editing">
+              <Check aria-hidden />
+              <span className={LABEL_FLOOR}>Done</span>
+            </Button>
+          ) : (
             <TodoActions
               done={done}
               busy={busy}
@@ -160,8 +168,9 @@ export function TodoDetail({
       )}
 
       <div className="min-h-0 flex-1 overflow-auto">
-        {/* Capped so a long body reads at a comfortable measure instead of running the pane's width. */}
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-4 py-4">
+        {/* Capped so a long body reads at a comfortable measure instead of running the pane's width,
+            and held to the same column the pinned header uses so the two share a left edge. */}
+        <div className={cn(DETAIL_MEASURE, "flex flex-col gap-5 py-4")}>
           {edit ? (
             <TodoEditor
               key={edit.mountKey}
@@ -172,7 +181,6 @@ export function TodoDetail({
               error={edit.error}
               onSave={edit.onSave}
               onReload={edit.onReload}
-              onDone={edit.onDone}
             />
           ) : (
             <>

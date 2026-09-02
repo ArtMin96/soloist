@@ -26,7 +26,16 @@ export function TodoItem({ todo, onOpen, lockOwnerLabel, onOpenAgent }: TodoItem
     // The card lifts to the next surface step on hover from anywhere in it, so it reads as one
     // object rather than as a row that happens to have a clickable region. Its two lines sit closer
     // to each other than one card sits to the next, which is what makes a card read as one thing.
-    <div className="flex items-center gap-1 rounded-lg border border-border/60 bg-muted p-1 transition-colors duration-[var(--dur-fast)] hover:border-border hover:bg-sidebar-accent">
+    //
+    // The edge is a transparency of the ink, not `--border`: that token resolves close to the pane
+    // in both themes (1.31:1 light, 1.44:1 dark), so a card drawn with it reads in neither. The fill
+    // cannot carry this either — any tint strong enough to read as an edge reads as a selected row,
+    // and the rest-to-hover fill step is worth only 1.05:1, so the border carries the whole state.
+    //
+    // The alpha is per-theme because one value cannot clear 3:1 on both grounds: ink on a near-white
+    // pane needs roughly half again the opacity that ink on a near-black one does. Keep the rest and
+    // hover alphas well apart, since nothing else marks the difference.
+    <div className="flex items-center gap-1 rounded-lg border border-foreground/45 bg-muted p-1 transition-colors duration-[var(--dur-fast)] hover:border-foreground/60 dark:border-foreground/32 dark:hover:border-foreground/45">
       {/* The card's own button and the agent control are siblings, not nested — a lock never buries
           an interactive control inside another one, so each is its own tab stop. */}
       <button

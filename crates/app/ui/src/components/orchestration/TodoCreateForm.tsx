@@ -41,7 +41,7 @@ export function TodoCreateForm({ onCreate, scratchpads, onCancel, error }: TodoC
   return (
     <div className="flex flex-col gap-2 border-b bg-sidebar-accent/40 p-3">
       {error && (
-        <p className="text-[0.8125rem] text-destructive" aria-live="polite">
+        <p className="type-body text-destructive" aria-live="polite">
           {error}
         </p>
       )}

@@ -7743,19 +7743,47 @@ and 0 at its maximum. `e2e/src/harness/window.ts` parses the config rather than 
 followed automatically. `DESIGN.md:685` updated; earlier `PROGRESS.md` entries mentioning 720 are historical
 and left as written.
 
+**Second pass — the open items above, closed.**
+- **Card border.** Was invisible in dark and weak in light. Now `border-foreground/45 dark:border-foreground/32`
+  (hover `/60` / `/45`), measured **3.05:1 light and 3.10:1 dark** composited over the card fill. A border
+  *token* could not have worked: `--border` is 1.44:1 dark and 1.31:1 in light, so it reads in neither theme —
+  a transparency of the ink moves away from the pane in whichever direction the theme runs. Recorded cost: at
+  `/45` the card outline carries about the weight of the status-chip outlines beside it, so hierarchy is now
+  text > chips ≈ card edge rather than text > chips > card edge. `/35` (~2.5:1) is where to go if that
+  hierarchy is later judged more important than clearing 3:1. Hover previously moved only the fill, at
+  1.13:1 dark / 1.05:1 light — imperceptible; it now moves a real 1.5:1 in both themes.
+- **Header/body alignment.** The pinned header was full-bleed against a centred `max-w-3xl` body — 308px of
+  disagreement, now 0. A second bug was hiding inside it: the title ran the full pane at 1332px and now sits
+  at 736px, matching the prose beneath. Both sides share one exported `DETAIL_MEASURE`, so they can only agree.
+- **Suspense flash.** `LazyRichTextEditor` takes an optional `fallback` defaulting to today's bordered box;
+  `CommentList` passes `null`. Comments lose ~240ms of empty boxes and a 57px jump; every other caller keeps
+  its frame through the default.
+- **Editor exit.** `Done` moved into the pinned header. `useAutosave` already flushes on unmount, so this is
+  one button, not a cross-boundary state lift; `data-todo-autosave-status` deliberately stayed put.
+- **`statusAttention` `#e19100` → `#b47400`** in `soloist-default`'s light override, taking the glyph from
+  2.16:1 to 3.19:1 on the chip's tinted plate. The *real* bug was the guard: `contrast.test.ts` filtered out
+  every theme carrying an explicit `extensions` block, so a hand-written hex was never checked by anything.
+  The filter is gone, the clamp's background list is exported as `markBackgrounds()` and shared with the test
+  instead of being rebuilt inline, and the guard now reddens on that exact hex.
+
 **Known open — next session should start here.**
-1. The card reads as a card only in light: border 5.7:1 there, **1.06:1 in dark** with a 1.14:1 fill. Needs
-   measurement in the running app, not a guessed value.
-2. The detail header is full-bleed while the body is a centred `max-w-3xl` column — a ~430px empty gutter at
-   wide widths. Either cap the header to the same measure or widen the body.
-3. Light-theme status glyphs are under the 3:1 non-text floor (amber ~1.9–2.3:1, green 2.95:1). The label is
-   redundant and legible, so this is a weakness rather than a failure.
-4. A cold-open todo with no description shows one Suspense fallback box per comment for ~240ms, then a 57px
-   layout jump.
-5. Row **tags** and the **locked-by control** have never been seen rendered — neither is reachable from the
-   app (both are MCP-only, with no Tauri command).
-6. `todo-e2e`'s mutation pass is unfinished; `coordination-panels.spec.ts` and `todo-workspace.spec.ts` were
-   12/12 green before the last round of changes and need re-running.
-7. Deferred, both real: clearing `orchestrationFocus` upstream in `App.tsx` (which also cures the identical
-   `ScratchpadPanel` defect — switching to Scratchpads re-opens the last-navigated scratchpad), and the
-   `type-*` ramp being restated as raw rem literals in ~147 further call sites across 80 files.
+1. **Selection washes sit outside the theme system.** `--sidebar-sel-fill-unemphasized` is a runtime
+   `color-mix` in `index.css`, not a member of `ThemeColors`, so `markBackgrounds()` structurally cannot
+   reference it. Status tones on a selected-but-unfocused sidebar row measure 2.51–2.75:1 and no clamp can
+   see that ground. Either promote the selection washes into `ThemeColors`, or decide translucent washes are
+   out of scope. Not a hex; an architecture call.
+2. Row **tags** and the **locked-by control** have still never been seen rendered — both are MCP-only with no
+   Tauri command, confirmed `rowsWithTags: 0` / `rowsWithLock: 0` across six live rows.
+3. `todo-e2e`'s mutation pass never completed. Both coordination specs were **12/12 green** before the header
+   rebuild, the `Edit` accessible-name change ("Edit todo" → "Edit"), the `⋯` menu tier and the 960px floor
+   landed; they need re-running.
+4. Fixture todos **#81–83** are in the user's real Soloist project and need deleting (MCP-only).
+5. Deferred, both real: clearing `orchestrationFocus` upstream in `App.tsx` (also cures `ScratchpadPanel`
+   re-opening its last-navigated scratchpad), and the `type-*` ramp restated as raw rem literals in ~147
+   further call sites across 80 files.
+
+**Measuring colour in this app — read before trusting a number.** Computed values resolve to `oklab()`, so a
+regex over `getComputedStyle` reads L/a/b as r/g/b and returns confident nonsense. Rasterise through a 1×1
+canvas instead. That is only half of it: `background-clip: border-box` means a translucent border composites
+over the element's **own fill**, not the surface behind it. Three measurement errors this session each briefly
+implied a real fix was unnecessary — a broken measurement tends to argue against whatever it is measuring.
