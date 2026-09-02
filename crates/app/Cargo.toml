@@ -65,7 +65,7 @@ tauri-plugin-autostart = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-devtools = { version = "2.1", optional = true }
 tauri-plugin-dialog = "2"
-tauri-plugin-mcp-bridge = { version = "0.12", optional = true }
+tauri-plugin-mcp-bridge = { version = "0.13", optional = true }
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
