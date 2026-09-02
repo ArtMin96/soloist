@@ -682,7 +682,7 @@ it, then the **attention count**. The branch is scoped to the project in view, b
 window is on is a title bar's own job; the count is every project's, because an alert must not hide
 behind whichever project happens to be selected. The strip has width the 280px rail did not — there
 the branch name was the only thing left that could shrink, and it shrank to nothing — but the badge is
-still the only item here that gives width up, so at the window's 720px minimum a long name truncates,
+still the only item here that gives width up, so at the window's 960px minimum a long name truncates,
 and the badge's tooltip carries it in full when it does. Each control is **absent, never empty**, when
 it has nothing to report, and the divider goes with them: a strip with nothing in it draws no line
 beside the window controls. The terminal and orchestration content panes wear the same `h-11` toolbar tone.

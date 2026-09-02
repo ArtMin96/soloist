@@ -7707,3 +7707,55 @@ not committed).
    status flip doesn't re-create the xterm (re-attach/replay — correct but mildly janky).
 5. **Do not pull deferred `later` rows into v1** (A5/A8/A10/A12/A13, B9, C8 webgl). The live `notify` watcher
    is now **Phase 6 work** (item 2), no longer "deferred".
+
+---
+
+## Session — todo workspace UI rebuild (branch `feat/todo-workspace-ux`)
+
+**State: in progress, not Verified.** Tree is green (`tsc` 0, vitest 183 files / 1411 tests, eslint, prettier)
+and the branch is coherent, but two visual defects are known-open and one verification pass is unfinished.
+
+**Landed.** The todo board's inline collapsible is replaced by master–detail panel navigation: a full-width
+card row navigates to a detail panel via a horizontal `transition-transform` track (`TodoPanels`, and a
+reusable `common/SlidingPanels`), with a back button and focus hand-off in both directions. Todo statuses are
+coloured through `TODO_STATUS_TONE` — tone on the chip tint and glyph, label always in ink, because the
+built-in light theme declares `extensions.soloist` and so bypasses `ensureThemeContrast` (attention `#e19100`
+measures 2.48:1). Comment bodies render through `MarkdownView`. Detail actions moved into a three-band header
+(chrome / title / meta rail) that sheds labels by container query and folds Edit + Copy into a `⋯` menu at
+narrow widths. Blockers lead the panel. Scratchpad provenance moved off the row into the detail. Spacing is a
+geometric ladder — 4px inside a card, 8px between cards, 16px between groups. Toolbar search adopts shadcn
+`input-group`. `DetailSection`/`DETAIL_WELL` were replaced by `common/Section` + `Well`.
+
+**Bugs found and fixed, each reproduced before the fix.**
+- Detail panel rendered offset with its Back button clipped outside the pane on every open: focus moved to
+  Back mid-transition and the browser's scroll-into-view scrolled the viewport, which `overflow-hidden` does
+  not prevent. Fixed with `focus({ preventScroll: true })` plus `overflow-clip` (measured in WebKitGTK:
+  under `hidden` a `scrollIntoView` moved the box 190px; under `clip`, 0).
+- The retained detail panel was never unmounted: the `transitionend` guard matched `propertyName === "transform"`
+  while Tailwind v4 compiles `-translate-x-full` to `translate`. Guard now accepts both. Caught by e2e, red
+  against the real code; jsdom fires no transitions and could not have seen it.
+- Opening the To-dos tab restored a stale detail route, because `orchestrationFocus` is a one-shot command
+  modelled as persistent state and `TodoBoard` is conditionally rendered.
+
+**Window minimum raised 720 → 960** (`crates/app/tauri.conf.json`). `GitRail` is `shrink-0` up to 560px and
+unclamped, so at the old floor the orchestration pane was 464px with the rail closed, 184px at its default
+and 0 at its maximum. `e2e/src/harness/window.ts` parses the config rather than restating it, so the harness
+followed automatically. `DESIGN.md:685` updated; earlier `PROGRESS.md` entries mentioning 720 are historical
+and left as written.
+
+**Known open — next session should start here.**
+1. The card reads as a card only in light: border 5.7:1 there, **1.06:1 in dark** with a 1.14:1 fill. Needs
+   measurement in the running app, not a guessed value.
+2. The detail header is full-bleed while the body is a centred `max-w-3xl` column — a ~430px empty gutter at
+   wide widths. Either cap the header to the same measure or widen the body.
+3. Light-theme status glyphs are under the 3:1 non-text floor (amber ~1.9–2.3:1, green 2.95:1). The label is
+   redundant and legible, so this is a weakness rather than a failure.
+4. A cold-open todo with no description shows one Suspense fallback box per comment for ~240ms, then a 57px
+   layout jump.
+5. Row **tags** and the **locked-by control** have never been seen rendered — neither is reachable from the
+   app (both are MCP-only, with no Tauri command).
+6. `todo-e2e`'s mutation pass is unfinished; `coordination-panels.spec.ts` and `todo-workspace.spec.ts` were
+   12/12 green before the last round of changes and need re-running.
+7. Deferred, both real: clearing `orchestrationFocus` upstream in `App.tsx` (which also cures the identical
+   `ScratchpadPanel` defect — switching to Scratchpads re-opens the last-navigated scratchpad), and the
+   `type-*` ramp being restated as raw rem literals in ~147 further call sites across 80 files.

@@ -11,7 +11,7 @@ import { orchestrationPane } from "../../src/screens/OrchestrationPane.js";
 import { scratchpadPanel } from "../../src/screens/ScratchpadPanel.js";
 import { sidebar } from "../../src/screens/Sidebar.js";
 import { terminalPane } from "../../src/screens/TerminalPane.js";
-import { todoBoard } from "../../src/screens/TodoBoard.js";
+import { todoBoard, type FitReading } from "../../src/screens/TodoBoard.js";
 
 // The lead the walk launches: over the real MCP/IPC wire its stub seeds a blocker chain, locks one
 // todo, and reads another todo and a scratchpad through tools — the accesses the core records as
@@ -22,13 +22,25 @@ const STOPPED: ProcStatus = "Stopped";
 // The status the lead declared on every todo it created; the blocker gate is derived, not declared.
 const OPEN: TodoStatus = "open";
 
+/**
+ * The handle a humanized document name was rendered from — "Release readiness" → "release-readiness".
+ * Asserting the handle rather than the prose keeps the walk on the identity the core carried, so a
+ * change to how a name is dressed for reading is not a failure of this walk.
+ */
+const asHandle = (label: string) => label.trim().toLowerCase().replace(/\s+/g, "-");
+
+/** The boxes whose content is wider than themselves — the ones a user would have to scroll sideways. */
+const overflowing = (boxes: FitReading[]) =>
+  boxes.filter((box) => box.scrollWidth > box.clientWidth);
+
 // The todo workspace as a user moves through it, in the real window against the real core: a
 // board row carries the id and blocker count the core computed from a chain built over the wire;
-// the row the lead locked names the lead and opens its terminal; that terminal's header lists the
-// lock as current work and the tool reads as this session, and each item leads straight back to
-// its own row, expanded and focused; the board's own surface fits the narrowest window the app
-// allows; and stopping the lead empties its context. Every assertion keys on state only the core produced — a lock held by a
-// bound session, an access recorded from a real tool call, a focus the engine really moved.
+// a card hands the pane to its detail panel and Back retraces the way in; the row the lead locked
+// names the lead and opens its terminal; that terminal's header lists the lock as current work and
+// the tool reads as this session, and each item leads straight back to the surface holding it; the
+// board's own surface fits the narrowest window the app allows; and stopping the lead empties its
+// context. Every assertion keys on state only the core produced — a lock held by a bound session,
+// an access recorded from a real tool call, a focus the engine really moved.
 describe("the todo workspace", () => {
   let project: ProjectView;
   /** The lead's process id as the core assigned it, read off the lineage tree. */
@@ -75,6 +87,29 @@ describe("the todo workspace", () => {
     expect(await todoBoard.blockerText(COORDINATION.commented)).toBe("2 unmet blockers");
   });
 
+  it("hands the pane to a card's detail panel, and returns to the row it came from", async () => {
+    const opened = await todoBoard.open(COORDINATION.blocked);
+    expect(opened.detail?.status).toBe(OPEN);
+
+    // The panel is where a todo states its provenance now that the row has stopped naming it, and
+    // this todo's is a link the lead made over the wire — so only the core can have put it here.
+    expect(asHandle(opened.detail?.scratchpad ?? "")).toBe(COORDINATION.scratchpad);
+
+    // Where focus ends up is the assertion, read off `document.activeElement` rather than off any
+    // component's intent: the board aims it at the arriving panel in a layout effect, and both
+    // halves of that were proven to fail — deleting the aim reddens this, and pointing the return
+    // aim at a dead handle reddens the row focus below, each on its own.
+    expect(opened.backFocused).toBe(true);
+
+    await todoBoard.back();
+
+    // The panel that left is really dropped, not parked off screen: the board keeps the todo
+    // rendered for the length of the slide out and unmounts it on the track's own `transitionend`,
+    // which only a transition that really ran can raise.
+    await todoBoard.waitForDetailDropped();
+    await todoBoard.waitForFocusedRow(locked);
+  });
+
   it("names the lead on the row it locked, and opens the lead's terminal from it", async () => {
     // The control appears only once the core reports the lock the lead took over the wire, and it
     // names the lead by label and targets the lead's real process id — the one the tree carries.
@@ -94,11 +129,15 @@ describe("the todo workspace", () => {
     expect(work.sessionScratchpads).toContain(COORDINATION.scratchpad);
   });
 
-  it("returns from a current-work item to that todo, expanded and focused", async () => {
+  it("returns from a current-work item to that todo, open and focused", async () => {
     await terminalPane.openSessionTodo(locked);
     await todoBoard.waitForTodo(COORDINATION.blocked);
-    await orchestrationPane.waitForFocusedTodo(locked);
-    expect(await todoBoard.isExpanded(COORDINATION.blocked)).toBe(true);
+
+    // The inbound half lands on the todo itself, not on a board the reader then has to search: the
+    // detail panel opens on it whatever the list's filter and grouping happen to be, and focus goes
+    // with it rather than staying behind in the panel that just went inert.
+    const landed = await todoBoard.waitForDetail(COORDINATION.blocked);
+    expect(landed.backFocused).toBe(true);
   });
 
   it("returns from a this-session item to that scratchpad, selected and focused", async () => {
@@ -116,10 +155,15 @@ describe("the todo workspace", () => {
     await todoBoard.waitForTodo(COORDINATION.blocked);
     await shrinkWindowToMinimum();
 
-    const overflowing = (await todoBoard.horizontalOverflow()).filter(
-      (box) => box.scrollWidth > box.clientWidth,
-    );
-    expect(overflowing).toEqual([]);
+    expect(overflowing(await todoBoard.horizontalOverflow())).toEqual([]);
+  });
+
+  it("fits the detail panel at that width too, where the whole todo is finally readable", async () => {
+    // The refactor moved half the board onto this surface — the document, its blockers, its
+    // discussion and every action — so the width the list was measured against is owed here too.
+    await todoBoard.open(COORDINATION.blocked);
+
+    expect(overflowing(await todoBoard.detailOverflow())).toEqual([]);
   });
 
   it("empties the lead's session context when the lead stops", async () => {

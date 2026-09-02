@@ -196,30 +196,4 @@ export const orchestrationPane = {
       () => `orchestration node "${label}" never disappeared from the tree`,
     );
   },
-
-  /**
-   * The id of the todo row that currently holds DOM focus, or `null` when none does — the
-   * landing spot cross-surface navigation (a terminal header's session-work item) is asserted
-   * against, read off the real focused element rather than a component's internal state.
-   */
-  async focusedTodoId(): Promise<number | null> {
-    const id = await browser.execute(() => {
-      const row = document.activeElement?.closest("[data-todo-id]");
-      return row?.getAttribute("data-todo-id") ?? null;
-    });
-    return id === null ? null : Number(id);
-  },
-
-  /** Waits until the todo row with `id` holds DOM focus — the inbound navigation has landed. */
-  async waitForFocusedTodo(id: number): Promise<void> {
-    let last: number | null = null;
-    await waitUntilOr(
-      async () => {
-        last = await this.focusedTodoId();
-        return last === id;
-      },
-      () =>
-        `focus never landed on todo ${id}; last focused todo: ${last ?? "none"}`,
-    );
-  },
 };

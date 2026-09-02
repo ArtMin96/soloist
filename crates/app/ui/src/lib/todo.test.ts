@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { TodoStatus } from "@/domain";
-import { commentAuthorLabel, TODO_STATUS, TODO_STATUS_ICON, unmetBlockerLabel } from "@/lib/todo";
+import {
+  commentAuthorLabel,
+  TODO_STATUS,
+  TODO_STATUS_ICON,
+  TODO_STATUS_TONE,
+  unmetBlockerLabel,
+} from "@/lib/todo";
 
 const STATUSES: TodoStatus[] = ["open", "blocked", "in_progress", "done"];
 
@@ -25,6 +31,14 @@ describe("todo display helpers", () => {
     for (const status of STATUSES) {
       expect(TODO_STATUS_ICON[status]).toBeDefined();
     }
+  });
+
+  it("gives every todo status a tone no other status shares", () => {
+    // A repeated tone would make two statuses look alike at a glance, which is the whole point of
+    // colouring them; the `Record` type only guarantees an entry exists, not that it is distinct.
+    const tones = STATUSES.map((status) => TODO_STATUS_TONE[status]);
+    expect(tones.every((tone) => tone.trim().length > 0)).toBe(true);
+    expect(new Set(tones).size).toBe(tones.length);
   });
 
   it("reads one unmet blocker singular and any other count plural", () => {

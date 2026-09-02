@@ -70,7 +70,7 @@ export function TodoEditor({
       )}
 
       {error && !conflict && (
-        <p className="text-[0.8125rem] text-destructive" aria-live="polite">
+        <p className="type-body text-destructive" aria-live="polite">
           {error}
         </p>
       )}
@@ -104,7 +104,7 @@ export function TodoEditor({
 
       <footer className="flex items-center gap-3">
         <span
-          className="text-[0.6875rem] text-muted-foreground"
+          className="type-label text-muted-foreground"
           aria-live="polite"
           data-todo-autosave-status
         >

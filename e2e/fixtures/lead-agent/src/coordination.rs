@@ -37,12 +37,15 @@ pub(crate) async fn run(
         )
         .await?,
     )?;
+    // The one todo derived from the scratchpad above: the link is made here, over the wire, so the
+    // detail panel naming that document is the core carrying an agent's own association through —
+    // never a name the window could have had to hand.
     let blocked = todo_id(
         request(
             stream,
             IpcRequest::TodoCreate {
                 doc: todo_doc(&plan.blocked),
-                scratchpad: None,
+                scratchpad: Some(plan.scratchpad.clone()),
             },
         )
         .await?,

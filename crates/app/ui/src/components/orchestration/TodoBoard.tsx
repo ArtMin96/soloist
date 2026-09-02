@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { TodoCreateForm } from "@/components/orchestration/TodoCreateForm";
+import { TodoDetail, type TodoEditState } from "@/components/orchestration/TodoDetail";
 import { TodoGroup } from "@/components/orchestration/TodoGroup";
-import { TodoItem, type TodoEditState } from "@/components/orchestration/TodoItem";
+import { TodoItem } from "@/components/orchestration/TodoItem";
+import { TodoPanels, type TodoPanel } from "@/components/orchestration/TodoPanels";
 import { TodoToolbar } from "@/components/orchestration/TodoToolbar";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { useCollapseState } from "@/store/useCollapseState";
@@ -21,6 +23,37 @@ import type { AgentNode, ScratchpadSummary, TodoView } from "@/domain";
 /** Namespaces this board's persisted collapse keys so they cannot collide with the sidebar's. */
 const COLLAPSE_PREFIX = "todos.scratchpad";
 
+// The last activation each project's board has already navigated for. A `focusNonce` is one
+// navigation, not a standing instruction — but the pane leaves it set on the props after acting on
+// it and unmounts the board whenever the user switches to another orchestration view, so a fresh
+// board would see the same activation still standing and open a detail nobody asked for. The board
+// cannot tell that case from a genuine one: an activation legitimately arrives at mount too, since
+// opening a todo from a terminal mounts the board with the nonce already on its props. So the fact
+// has to be remembered somewhere that outlives the component, which is here. One entry per project
+// the user navigates into, holding one number.
+const navigatedNonces = new Map<number, number>();
+
+/**
+ * The detail panel's target. `showing` is the route — false while the panel slides back out, which
+ * is what keeps the todo rendered for the length of that movement rather than blanking on the way.
+ */
+interface DetailTarget {
+  id: number;
+  showing: boolean;
+}
+
+// Moves DOM focus into the panel a route change just brought on screen, aiming at `within` when that
+// panel offers it and at the panel itself when it does not. Queried by the same `data-todo-*` handles
+// the end-to-end walks use, rather than threading refs down through two panels' components. The
+// scroll is asked for explicitly and refused to `focus`, so bringing a row back into view stays
+// vertical and neither call can drag the panel track sideways.
+function focusPanel(panel: TodoPanel, within: string) {
+  const root = document.querySelector<HTMLElement>(`[data-todo-panel="${panel}"]`);
+  const target = root?.querySelector<HTMLElement>(within) ?? root;
+  target?.scrollIntoView({ block: "nearest" });
+  target?.focus({ preventScroll: true });
+}
+
 // The to-do board: the project's shared work items, filterable and fully editable. The todos come
 // from the live snapshot (refreshed on TodoChanged); every write — create, edit, complete, comment —
 // routes through the same core commands agents use (the editor and action hooks are the only IPC
@@ -28,12 +61,20 @@ const COLLAPSE_PREFIX = "todos.scratchpad";
 // banner when a concurrent write moves a todo out from under an open editor. Blocker titles and a
 // lock owner's label are resolved from the same snapshot, so the board names them, not bare ids.
 //
-// Rows are grouped by the scratchpad each todo derives from by default, because that is the shape
+// The board is two panels, not one list. Opening a todo hands the whole pane to its detail, where
+// the document, its blockers and its discussion each get a width a dense list cannot give them, and
+// Back returns to the list exactly as it was left — filter, grouping and scroll position included.
+// At most one todo is open, and any edit session belongs to it, so leaving that todo ends the
+// session rather than letting an unsaved draft outlive the panel showing it.
+//
+// Cards are grouped by the scratchpad each todo derives from by default, because that is the shape
 // the work actually has — tasks extracted from a plan belong under it. `All` flattens the board for
 // triage, when the question is "what is open" rather than "what came from where". Filtering flattens
-// it too: a search is already a triage question, and headers over one or two surviving rows each
-// would bury the matches they are meant to organise. A flattened row names its own scratchpad, so
-// nothing is lost with the headers. Grouping is a wrapper — the rows are identical in both views.
+// it too: a search is already a triage question, and headers over one or two surviving cards each
+// would bury the matches they are meant to organise. A card never names its own scratchpad in either
+// view — the detail panel is where a todo's provenance is stated, and repeating it on every card
+// would spend a line of the densest surface on what the header above already said. Grouping is a
+// wrapper: the cards are identical in both views.
 export function TodoBoard({
   project,
   todos,
@@ -47,16 +88,16 @@ export function TodoBoard({
   todos: TodoView[];
   agents: AgentNode[];
   scratchpads: ScratchpadSummary[];
-  /** Opens the agent a row is locked by — absent when the caller offers no navigation. */
+  /** Opens the agent a card is locked by — absent when the caller offers no navigation. */
   onOpenAgent?: (process: number) => void;
-  /** The todo to expand and focus when `focusNonce` changes — cross-surface navigation, inbound. */
+  /** The todo to open the detail panel on when `focusNonce` changes — cross-surface navigation. */
   focusId?: number;
-  /** Bumped to re-trigger the focus above, even to repeat the same `focusId`. */
+  /** Bumped to re-trigger the navigation above, even to repeat the same `focusId`. */
   focusNonce?: number;
 }) {
   const actions = useTodoActions(project);
   const editor = useTodoEditor(project);
-  const [openId, setOpenId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<DetailTarget | null>(null);
   const [filter, setFilter] = useState<TodoFilter>(EMPTY_TODO_FILTER);
   const [view, setView] = useState<BoardView>("grouped");
   const [collapsed, setCollapsed] = useCollapseState();
@@ -69,67 +110,83 @@ export function TodoBoard({
   const titleOf = (id: number) => todos.find((todo) => todo.id === id)?.doc.title;
   const labelOf = (id: number) => agents.find((agent) => agent.id === id)?.label;
 
+  // Resolved against the whole snapshot, never the filtered set: the toolbar's filter belongs to the
+  // list panel, and searching there must not slam an open detail shut.
+  const detailTodo = detail != null ? todos.find((todo) => todo.id === detail.id) : undefined;
+  const showing: TodoPanel = detail?.showing ? "detail" : "list";
+
+  const pendingFocusRef = useRef<{ panel: TodoPanel; within: string } | null>(null);
+
+  // Ends the open edit session whenever navigation leaves the todo it belongs to, so unsaved edits
+  // can neither resurface on a later re-open nor follow the board onto a different todo.
+  const endEditUnless = (id: number | null) => {
+    if (editor.mode === "edit" && editor.editingId !== id) editor.close();
+  };
+
+  const openDetail = (id: number) => {
+    endEditUnless(id);
+    setDetail({ id, showing: true });
+    pendingFocusRef.current = { panel: "detail", within: "[data-todo-back]" };
+  };
+
+  const showList = () => setDetail((current) => (current ? { ...current, showing: false } : null));
+
+  const back = () => {
+    const from = detail?.id;
+    endEditUnless(null);
+    showList();
+    pendingFocusRef.current = {
+      panel: "list",
+      within: `[data-todo-id="${from}"] [data-todo-trigger]`,
+    };
+  };
+
   const startCreate = () => {
-    setOpenId(null);
+    showList();
     editor.startCreate();
   };
 
-  const toggle = (id: number) => {
-    setOpenId((current) => {
-      const next = current === id ? null : id;
-      // Collapsing the row being edited ends its edit session so a re-open starts from the read view.
-      if (next !== id && editor.mode === "edit" && editor.editingId === id) editor.close();
-      return next;
-    });
-  };
-
-  // Whether the focus target has actually arrived in the live snapshot. Coming from a freshly
-  // mounted pane, `focusNonce` can be set before the first snapshot lands — `targetPresent`
-  // gates the reveal below on that, and its own presence in the effect's deps is what makes the
-  // reveal retry once the todo shows up, rather than silently missing it.
-  const targetPresent = focusId != null && todos.some((todo) => todo.id === focusId);
-  const revealedNonceRef = useRef<number | undefined>(undefined);
-  const pendingFocusRef = useRef<{ nonce: number; id: number } | null>(null);
-
-  // Cross-surface navigation's inbound half, step one: once the target row exists, clear a
-  // filter that hides it and expand its scratchpad group if the board is grouped and it is
-  // collapsed, then hand off to the effect below — a collapsed Radix panel keeps its content
-  // mounted but `hidden`, so focusing it only works once it opens.
-  useEffect(() => {
-    if (focusId == null || focusNonce == null || !targetPresent) return;
-    if (revealedNonceRef.current === focusNonce) return;
-    revealedNonceRef.current = focusNonce;
-
-    setOpenId(focusId);
-    if (!visible.some((todo) => todo.id === focusId)) setFilter(EMPTY_TODO_FILTER);
-    const group = groupTodosByScratchpad(todos).find((candidate) =>
-      candidate.todos.some((todo) => todo.id === focusId),
-    );
-    if (group) setCollapsed(`${COLLAPSE_PREFIX}.${group.key}`, false);
-
-    pendingFocusRef.current = { nonce: focusNonce, id: focusId };
-    // Only the reveal's own trigger conditions belong here — `visible`/`todos`/`collapsed` are
-    // read for their value at reveal time, not to re-run the reveal when they later change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusNonce, focusId, targetPresent]);
-
-  // Step two: moves DOM focus once the trigger the step above revealed actually mounts —
-  // retried on every render (no deps array) until it does, then self-clears. Queried by the
-  // same `data-todo-*` handles the e2e layer uses, rather than threading a ref through the
-  // Collapsible wrapper.
-  useEffect(() => {
+  // A route change is the one moment focus can be lost: the panel leaving goes inert, and focus left
+  // inside it would fall to the document body and restart keyboard traversal at the top of the app.
+  // Laid out rather than deferred, so there is no painted frame in between; read from a ref rather
+  // than from the route, so a repeat navigation to the todo already open still refocuses it.
+  useLayoutEffect(() => {
     const pending = pendingFocusRef.current;
     if (pending == null) return;
-    const trigger = document.querySelector<HTMLElement>(
-      `[data-todo-id="${pending.id}"] [data-todo-trigger]`,
-    );
-    if (trigger == null) return;
-    trigger.scrollIntoView({ block: "nearest" });
-    trigger.focus();
     pendingFocusRef.current = null;
+    focusPanel(pending.panel, pending.within);
   });
 
-  // The edit surface for one row, present only while it is the one being edited. A concurrent write
+  // A todo can vanish from under an open detail panel — deleted, or moved out of this project. There
+  // is nothing left to show or edit, so the board drops straight back to the list rather than holding
+  // a panel over a todo that no longer exists. Only while the panel is showing: one already sliding
+  // out is cleared by `onSettled` a beat later, and cutting it short would blank it mid-movement.
+  useEffect(() => {
+    if (detail == null || !detail.showing || detailTodo != null) return;
+    setDetail(null);
+    if (editor.mode === "edit" && editor.editingId === detail.id) editor.close();
+  }, [detail, detailTodo, editor]);
+
+  // Whether the navigation target has actually arrived in the live snapshot. Coming from a freshly
+  // mounted pane, `focusNonce` can be set before the first snapshot lands — `targetPresent` gates
+  // the navigation below on that, and its own presence in the effect's deps is what makes the
+  // navigation retry once the todo shows up, rather than silently missing it.
+  const targetPresent = focusId != null && todos.some((todo) => todo.id === focusId);
+
+  // Cross-surface navigation's inbound half: a fresh nonce opens that todo's detail panel directly,
+  // so the target is on screen whatever the list panel's filter and grouping happen to be. An
+  // activation already navigated for is spent, even across a remount — see `navigatedNonces`.
+  useEffect(() => {
+    if (focusId == null || focusNonce == null || !targetPresent) return;
+    if (navigatedNonces.get(project) === focusNonce) return;
+    navigatedNonces.set(project, focusNonce);
+    openDetail(focusId);
+    // Only the navigation's own trigger conditions belong here — `openDetail` closes over the live
+    // editor, a fresh object every render, which would re-fire this on every one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusNonce, focusId, targetPresent, project]);
+
+  // The edit surface for one todo, present only while it is the one being edited. A concurrent write
   // that moves the live todo past the opened revision is the conflict the editor pauses on.
   const editStateFor = (todo: TodoView): TodoEditState | null => {
     if (editor.mode !== "edit" || editor.editingId !== todo.id || editor.initial == null) {
@@ -151,24 +208,13 @@ export function TodoBoard({
     };
   };
 
-  const row = (todo: TodoView) => (
+  const card = (todo: TodoView) => (
     <li key={todo.id} data-todo-id={todo.id}>
       <TodoItem
         todo={todo}
-        open={openId === todo.id}
-        onToggle={() => toggle(todo.id)}
-        titleOf={titleOf}
+        onOpen={() => openDetail(todo.id)}
         lockOwnerLabel={todo.locked_by != null ? labelOf(todo.locked_by) : undefined}
-        busy={actions.busyId === todo.id}
-        error={actions.errorById[todo.id]}
-        onComplete={() => actions.complete(todo.id)}
-        onCopyLink={() => actions.copyLink(todo.id)}
-        onComment={(body) => actions.comment(todo.id, body)}
-        onStartEdit={() => editor.editTodo(todo)}
         onOpenAgent={onOpenAgent}
-        showScratchpad={!grouped}
-        scratchpads={scratchpads}
-        edit={editStateFor(todo)}
       />
     </li>
   );
@@ -177,8 +223,8 @@ export function TodoBoard({
   // form's own Create is then the default and two filled buttons would each claim to be it.
   const creating = editor.mode === "create";
 
-  return (
-    <div className="flex h-full min-h-0 flex-col tracking-[var(--tracking-body)]">
+  const list = (
+    <>
       <TodoToolbar
         filter={filter}
         tags={tags}
@@ -217,9 +263,9 @@ export function TodoBoard({
             </EmptyHeader>
           </Empty>
         ) : grouped ? (
-          // Sections are plain containers, not list items: the rows stay the only list entries, so a
-          // row is addressed the same way whichever view is showing.
-          <div className="flex flex-col px-1 pt-1">
+          // Sections are plain containers, not list items: the cards stay the only list entries, so a
+          // card is addressed the same way whichever view is showing.
+          <div className="flex flex-col gap-2 px-3 pt-2 pb-2">
             {groups.map((group) => (
               <TodoGroup
                 key={group.key}
@@ -228,14 +274,47 @@ export function TodoBoard({
                 open={!collapsed[`${COLLAPSE_PREFIX}.${group.key}`]}
                 onOpenChange={(open) => setCollapsed(`${COLLAPSE_PREFIX}.${group.key}`, !open)}
               >
-                <ul className="flex flex-col">{group.todos.map(row)}</ul>
+                <ul className="flex flex-col gap-2 pt-1 pb-2 pl-1">{group.todos.map(card)}</ul>
               </TodoGroup>
             ))}
           </div>
         ) : (
-          <ul className="flex flex-col px-1">{visible.map(row)}</ul>
+          <ul className="flex flex-col gap-2 px-3 py-2">{visible.map(card)}</ul>
         )}
       </div>
+    </>
+  );
+
+  return (
+    <div className="flex h-full min-h-0 flex-col tracking-[var(--tracking-body)]">
+      <TodoPanels
+        showing={showing}
+        list={list}
+        detail={
+          detailTodo && (
+            <TodoDetail
+              todo={detailTodo}
+              onBack={back}
+              titleOf={titleOf}
+              lockOwnerLabel={
+                detailTodo.locked_by != null ? labelOf(detailTodo.locked_by) : undefined
+              }
+              onOpenAgent={onOpenAgent}
+              busy={actions.busyId === detailTodo.id}
+              error={actions.errorById[detailTodo.id]}
+              onComplete={() => actions.complete(detailTodo.id)}
+              onCopyLink={() => actions.copyLink(detailTodo.id)}
+              onComment={(body) => actions.comment(detailTodo.id, body)}
+              onStartEdit={() => editor.editTodo(detailTodo)}
+              scratchpads={scratchpads}
+              edit={editStateFor(detailTodo)}
+            />
+          )
+        }
+        // The detail's todo stays rendered until its panel has finished sliding out, so the panel
+        // leaving carries the content the reader was looking at rather than blanking on the way.
+        onSettled={() => setDetail((current) => (current?.showing === false ? null : current))}
+      />
     </div>
   );
 }

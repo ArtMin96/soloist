@@ -101,8 +101,9 @@ describe("the coordination panels", () => {
 
     // The comment renders its body and its author — the lead's own label, which the core stamped
     // from the creating bound session, not anything the window or the caller supplied. An unbound
-    // author would read "unattributed"; only a real bound session earns the label.
-    const text = await todoBoard.expandedText(COORDINATION.commented);
+    // author would read "unattributed"; only a real bound session earns the label. The thread lives
+    // in the todo's detail panel, which the board hands the pane to when the card is opened.
+    const text = await todoBoard.detailText(COORDINATION.commented);
     expect(text).toContain(COORDINATION.comment);
     expect(text).toContain(LEAD);
   });

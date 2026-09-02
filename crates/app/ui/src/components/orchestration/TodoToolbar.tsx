@@ -1,7 +1,7 @@
 import { Plus, Search } from "lucide-react";
 import { TagFilterChips } from "@/components/orchestration/TagFilterChips";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import {
   Select,
   SelectContent,
@@ -43,22 +43,22 @@ export function TodoToolbar({
   onCreate,
 }: TodoToolbarProps) {
   return (
-    <div data-todo-toolbar className="flex shrink-0 flex-col gap-1.5 border-b p-2">
+    <div data-todo-toolbar className="flex shrink-0 flex-col gap-1.5 border-b px-3 py-2">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-32 flex-1 basis-40">
-          <Search
-            className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
-            aria-hidden
-          />
-          <Input
+        {/* Sized to match the sm controls beside it; the leading icon's inset is the group's own,
+            so nothing here hand-picks a padding to clear it. */}
+        <InputGroup className="h-7 min-w-32 flex-1 basis-40">
+          <InputGroupAddon>
+            <Search aria-hidden />
+          </InputGroupAddon>
+          <InputGroupInput
             type="search"
             value={filter.search}
             onChange={(event) => onChange({ ...filter, search: event.target.value })}
             placeholder="Search todos…"
             aria-label="Search todos"
-            className="h-7 pl-7 text-[0.8125rem]"
           />
-        </div>
+        </InputGroup>
         <Select
           value={filter.status}
           onValueChange={(value) => onChange({ ...filter, status: value as StatusFilter })}
