@@ -162,6 +162,7 @@ describe("applyEvent", () => {
   it("leaves the process list untouched for events another read model owns", () => {
     const elsewhere: DomainEvent[] = [
       { type: "TodoChanged", project: 1, id: 7 },
+      { type: "SessionWorkChanged", process: 1 },
       { type: "TimerArmed", owner: 1, id: 2 },
       { type: "TimerFired", owner: 1, id: 2 },
       { type: "TimerCleared", owner: 1, id: 2 },

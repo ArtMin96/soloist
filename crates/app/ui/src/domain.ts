@@ -330,6 +330,9 @@ export type DomainEvent =
   // Coordination change-notifications (C6) for the orchestration read-model. Each carries ids
   // only — the UI re-reads orchestration_snapshot (coalesced) rather than trusting a payload.
   | { type: "TodoChanged"; project: number; id: number }
+  // A process's recorded session-work touched a todo or scratchpad, or the process closed and its
+  // record was forgotten. Carries the process only — the surface re-reads sessionWork(process).
+  | { type: "SessionWorkChanged"; process: number }
   // A recorded agent-to-agent exchange changed — queued, woken, or acknowledged. The body stays
   // off the bus; the retained record on the snapshot is its single source.
   | { type: "AgentMessageChanged"; project: number; id: number }
@@ -906,6 +909,36 @@ export interface OrchestrationSnapshot {
   kv: KvEntry[];
   /** Recorded agent-to-agent exchanges in the project, oldest first. */
   messages: AgentMessageRecord[];
+}
+
+// ── Session work context (mirrors core::orchestration) ───────────────────────
+// How an agent touched a coordination document this run: read through a tool, or written.
+export type AccessKind = "loaded" | "worked";
+
+export interface SessionTodo {
+  id: number;
+  title: string;
+  status: TodoStatus;
+  blocked: boolean;
+  /** True while this process holds the todo's lock — "current work". */
+  locked: boolean;
+  /** How this process last touched it this run; null when it holds the lock without a tool access. */
+  access: AccessKind | null;
+}
+
+export interface SessionScratchpad {
+  id: number;
+  name: string;
+  access: AccessKind;
+}
+
+// The coordination documents one process holds now or touched this run — the agent terminal
+// header's context. Produced by the `session_work` query (exposed to the UI by a Tauri command).
+export interface SessionWork {
+  process: number;
+  project: number;
+  todos: SessionTodo[];
+  scratchpads: SessionScratchpad[];
 }
 
 // ── Settings (mirrors core::settings) ───────────────────────────────────────

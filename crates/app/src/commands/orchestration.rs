@@ -8,7 +8,9 @@
 
 use std::sync::Arc;
 
-use soloist_core::{AgentSignal, Facade, LineageEdge, OrchestrationSnapshot, ProjectId};
+use soloist_core::{
+    AgentSignal, Facade, LineageEdge, OrchestrationSnapshot, ProcessId, ProjectId, SessionWork,
+};
 use tauri::State;
 
 /// The orchestration read-model for `project`: its agent lineage tree plus the coordination
@@ -40,4 +42,17 @@ pub async fn lineage_edges(facade: State<'_, Arc<Facade>>) -> Result<Vec<Lineage
 #[tauri::command]
 pub async fn agent_activity(facade: State<'_, Arc<Facade>>) -> Result<Vec<AgentSignal>, String> {
     Ok(facade.agent_activity())
+}
+
+/// The coordination documents `process` holds now or touched this run — the agent terminal
+/// header's context. A local read like [`orchestration_snapshot`]: authorization is the caller's.
+#[tauri::command]
+pub async fn session_work(
+    facade: State<'_, Arc<Facade>>,
+    process: ProcessId,
+) -> Result<Option<SessionWork>, String> {
+    facade
+        .blocking(move |f| f.session_work(process))
+        .await
+        .map_err(|err| err.to_string())
 }
