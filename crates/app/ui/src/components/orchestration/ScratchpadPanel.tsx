@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { scratchpadArchive } from "@/api";
 import { DocumentPanel, DocumentPlaceholder } from "@/components/orchestration/DocumentPanel";
 import { ScratchpadEditor } from "@/components/orchestration/ScratchpadEditor";
@@ -15,9 +15,15 @@ import type { ScratchpadSummary } from "@/domain";
 export function ScratchpadPanel({
   project,
   scratchpads,
+  focusName,
+  focusNonce,
 }: {
   project: number;
   scratchpads: ScratchpadSummary[];
+  /** The scratchpad to open and focus when `focusNonce` changes — cross-surface navigation, inbound. */
+  focusName?: string;
+  /** Bumped to re-trigger the focus above, even to repeat the same `focusName`. */
+  focusNonce?: number;
 }) {
   const editor = useScratchpadEditor(project);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -37,6 +43,27 @@ export function ScratchpadPanel({
   }, [project, editor.name, archived]);
 
   useScratchpadHotkeys(panelRef, editor.name != null ? archiveOpen : undefined);
+
+  // Cross-surface navigation's inbound half: a fresh `focusNonce` opens the named scratchpad
+  // through the existing `editor.open` path and moves DOM focus to its roster row, even on a
+  // repeat of the same `focusName`. Coming from a terminal, this pane mounts fresh and its first
+  // snapshot can still be in flight when the focus props land — `targetPresent` re-fires the
+  // effect once the row actually appears in `scratchpads`, and `focusedNonceRef` remembers which
+  // nonce was last acted on so that retry stops there, while a genuinely new nonce (even for the
+  // same name) still refocuses. `open` is `useCallback`-stable on `project`, so depending on it
+  // (not the fresh `editor` object every render returns) still fires only on a real focus change.
+  const { open } = editor;
+  const focusedNonceRef = useRef<number | null>(null);
+  const targetPresent = focusName != null && scratchpads.some((pad) => pad.name === focusName);
+  useEffect(() => {
+    if (focusName == null || focusNonce == null || !targetPresent) return;
+    if (focusedNonceRef.current === focusNonce) return;
+    focusedNonceRef.current = focusNonce;
+    open(focusName);
+    const row = document.querySelector<HTMLElement>(`[data-scratchpad-name="${focusName}"]`);
+    row?.scrollIntoView({ block: "nearest" });
+    row?.focus();
+  }, [focusNonce, focusName, open, targetPresent]);
 
   return (
     <DocumentPanel

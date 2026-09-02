@@ -74,4 +74,38 @@ describe("ScratchpadPanel", () => {
     await waitFor(() => expect(screen.getByLabelText("Scratchpad body")).toBeTruthy());
     expect(screen.queryByText("Loading…")).toBeNull();
   });
+
+  it("focuses the target row once it arrives, even when the focus props land before the first snapshot", async () => {
+    vi.mocked(scratchpadRead).mockResolvedValue({
+      id: 1,
+      name: "release-plan",
+      body: "the plan",
+      rendered: "# release-plan\n\nthe plan",
+      tags: [],
+      archived: false,
+      revision: 1,
+    });
+
+    // Coming straight from a terminal, the pane mounts before its first snapshot arrives — the
+    // focus target is not in `scratchpads` yet on this first render.
+    const { rerender } = render(
+      <ScratchpadPanel project={1} scratchpads={[]} focusName="release-plan" focusNonce={1} />,
+    );
+    expect(document.querySelector('[data-scratchpad-name="release-plan"]')).toBeNull();
+
+    rerender(
+      <ScratchpadPanel
+        project={1}
+        scratchpads={[pad(1, "release-plan")]}
+        focusName="release-plan"
+        focusNonce={1}
+      />,
+    );
+
+    await waitFor(() => {
+      const row = document.querySelector('[data-scratchpad-name="release-plan"]');
+      expect(row).not.toBeNull();
+      expect(document.activeElement).toBe(row);
+    });
+  });
 });

@@ -13,6 +13,7 @@ import {
   SettingsOverlay,
   TerminalPane,
 } from "@/components/deferredAppComponents";
+import type { OrchestrationFocus } from "@/components/orchestration/orchestrationFocus";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { NotificationToasts } from "@/components/NotificationToasts";
 import { OrphanDialog } from "@/components/OrphanDialog";
@@ -79,6 +80,7 @@ export default function App() {
   const agents = useAgents(store.reportError);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [orchestrationProjectId, setOrchestrationProjectId] = useState<number | null>(null);
+  const [orchestrationFocus, setOrchestrationFocus] = useState<OrchestrationFocus | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTabId | null>(null);
@@ -90,6 +92,7 @@ export default function App() {
   const clearAlternativeView = useCallback(() => {
     setSelectedProjectId(null);
     setOrchestrationProjectId(null);
+    setOrchestrationFocus(null);
   }, []);
 
   // Settings, on the tab a caller named where it had a reason to name one — the assist setting is
@@ -159,6 +162,20 @@ export default function App() {
       setSelectedProjectId(null);
     },
     [deselectProcess],
+  );
+
+  // The session-work bar's opener: reuses `openOrchestration` for the pane switch, then names the
+  // exact item to focus with a fresh nonce, so activating the same item twice in a row still
+  // refocuses it rather than being a no-op.
+  const openOrchestrationItem = useCallback(
+    (
+      projectId: number,
+      focus: { view: "todos"; id: number } | { view: "scratchpads"; name: string },
+    ) => {
+      openOrchestration(projectId);
+      setOrchestrationFocus({ ...focus, nonce: Date.now() });
+    },
+    [openOrchestration],
   );
 
   const stopProcess = useCallback(
@@ -334,6 +351,15 @@ export default function App() {
                                   processes={store.processes}
                                   onSelectProcess={selectProcess}
                                   handlers={handlers}
+                                  onOpenTodo={(id) =>
+                                    openOrchestrationItem(process.project, { view: "todos", id })
+                                  }
+                                  onOpenScratchpad={(name) =>
+                                    openOrchestrationItem(process.project, {
+                                      view: "scratchpads",
+                                      name,
+                                    })
+                                  }
                                 />
                               ))}
                               {!selected &&
@@ -346,6 +372,8 @@ export default function App() {
                                   <OrchestrationPane
                                     key={orchestrationProject.id}
                                     project={orchestrationProject}
+                                    focus={orchestrationFocus}
+                                    onOpenAgent={selectProcess}
                                   />
                                 ) : (
                                   <StartSurface

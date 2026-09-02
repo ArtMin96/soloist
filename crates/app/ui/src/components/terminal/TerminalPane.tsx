@@ -5,6 +5,7 @@ import { ProcessIndicator } from "@/components/ProcessIndicator";
 import { ProcessMeta } from "@/components/sidebar/ProcessMeta";
 import { FindBar } from "@/components/terminal/FindBar";
 import { LinkTarget } from "@/components/terminal/LinkTarget";
+import { SessionWorkBar } from "@/components/terminal/SessionWorkBar";
 import { TerminalDropTarget } from "@/components/terminal/TerminalDropTarget";
 import { useTerminal } from "@/components/terminal/useTerminal";
 import { useTerminalChrome } from "@/components/terminal/useTerminalChrome";
@@ -13,6 +14,7 @@ import { useTerminalHotkeys } from "@/components/terminal/useTerminalHotkeys";
 import type { ProcessActionHandlers } from "@/lib/processActions";
 import { terminalColors } from "@/lib/terminalPalette";
 import { useAppearance } from "@/store/appearanceContext";
+import { useSessionWork } from "@/store/useSessionWork";
 import { useSignal } from "@/store/signalsContext";
 import { cn } from "@/lib/utils";
 import type { ProcessView } from "@/domain";
@@ -20,6 +22,10 @@ import type { ProcessView } from "@/domain";
 // A stable empty default so an unspecified `processes` keeps the same identity across renders —
 // a fresh `[]` each render would defeat memoized consumers and re-run the hotkey subscription.
 const NO_PROCESSES: ProcessView[] = [];
+
+// A stable no-op default for the session-work openers, so a caller offering no navigation still
+// gets the bar rather than a conditional that special-cases the missing callback.
+const NOOP = () => {};
 
 interface TerminalPaneProps {
   process: ProcessView;
@@ -30,6 +36,10 @@ interface TerminalPaneProps {
   /** Called when a terminal-scope nav shortcut selects a different process. */
   onSelectProcess?: (id: number) => void;
   handlers: ProcessActionHandlers;
+  /** Opens the orchestration pane on the named todo — absent when the caller offers no navigation. */
+  onOpenTodo?: (todo: number) => void;
+  /** Opens the orchestration pane on the named scratchpad — absent when navigation is unavailable. */
+  onOpenScratchpad?: (name: string) => void;
 }
 
 // The interactive PTY for the selected process: a header naming it with its status and
@@ -41,12 +51,18 @@ export function TerminalPane({
   processes = NO_PROCESSES,
   onSelectProcess,
   handlers,
+  onOpenTodo = NOOP,
+  onOpenScratchpad = NOOP,
 }: TerminalPaneProps) {
   const sectionRef = useRef<HTMLElement>(null);
   const { hostRef, state, linkTarget, search, clipboard, insert } = useTerminal(process, visible);
   const dropping = useTerminalFileDrop(hostRef, insert, visible);
   const { title, ringing } = useTerminalChrome(process.id);
   const { metrics, restart, activity } = useSignal(process.id);
+  // Only a visible agent pane carries live session-work context — a hidden pooled terminal or a
+  // Command/Terminal process (neither holds coordination locks) reads nothing and subscribes to
+  // nothing.
+  const { work } = useSessionWork(process.id, visible && process.kind === "Agent");
   const { appliedTheme } = useAppearance();
   // The emulator's own surface color, so the host bleeds it to every edge — the sub-cell
   // remainder and scrollbar gutter read as terminal margin, not an app-colored frame.
@@ -105,7 +121,8 @@ export function TerminalPane({
             className="size-3.5 shrink-0 text-primary motion-safe:animate-pulse"
           />
         )}
-        <div className="ml-auto">
+        <SessionWorkBar work={work} onOpenTodo={onOpenTodo} onOpenScratchpad={onOpenScratchpad} />
+        <div className="ml-auto shrink-0">
           <ProcessControls process={process} handlers={handlers} size="icon-sm" />
         </div>
       </header>

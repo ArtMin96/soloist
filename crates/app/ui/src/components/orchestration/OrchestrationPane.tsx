@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DiagramPanel } from "@/components/orchestration/DiagramPanel";
 import { MessagesPanel } from "@/components/orchestration/MessagesPanel";
 import { OrchestrationTree } from "@/components/orchestration/OrchestrationTree";
@@ -9,6 +9,7 @@ import { SegmentedControl } from "@/components/SegmentedControl";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { monogram } from "@/store/projects";
 import { useOrchestration } from "@/store/useOrchestration";
+import type { OrchestrationFocus } from "@/components/orchestration/orchestrationFocus";
 import type { Option } from "@/lib/appearance";
 import type { ProjectView } from "@/domain";
 
@@ -27,11 +28,27 @@ const VIEW_OPTIONS: Option<View>[] = [
 // shared coordination documents (todos, scratchpads, timers) and the traffic between the agents. Owns the read-model hook — the only
 // place here that reaches IPC — and switches the body between views. Each view is presentational
 // over the one snapshot the hook keeps live (snapshot-then-deltas).
-export function OrchestrationPane({ project }: { project: ProjectView }) {
+export function OrchestrationPane({
+  project,
+  focus,
+  onOpenAgent,
+}: {
+  project: ProjectView;
+  /** A session-work item to switch to and expand/select, set by the caller on each activation. */
+  focus?: OrchestrationFocus | null;
+  /** Opens the agent a todo row is locked by — forwarded to the todo board. */
+  onOpenAgent?: (process: number) => void;
+}) {
   const { tree, agents, todos, scratchpads, diagrams, timers, messages, error } = useOrchestration(
     project.id,
   );
   const [view, setView] = useState<View>("agents");
+
+  // Cross-surface navigation's inbound half: a focus target switches the pane to its view. The
+  // target row's own expand-and-focus is the board/panel's job, keyed off the same nonce.
+  useEffect(() => {
+    if (focus != null) setView(focus.view);
+  }, [focus]);
 
   return (
     <section className="flex h-full min-w-0 flex-col bg-background">
@@ -61,10 +78,23 @@ export function OrchestrationPane({ project }: { project: ProjectView }) {
           </div>
         )}
         {view === "todos" && (
-          <TodoBoard project={project.id} todos={todos} agents={agents} scratchpads={scratchpads} />
+          <TodoBoard
+            project={project.id}
+            todos={todos}
+            agents={agents}
+            scratchpads={scratchpads}
+            onOpenAgent={onOpenAgent}
+            focusId={focus?.view === "todos" ? focus.id : undefined}
+            focusNonce={focus?.view === "todos" ? focus.nonce : undefined}
+          />
         )}
         {view === "scratchpads" && (
-          <ScratchpadPanel project={project.id} scratchpads={scratchpads} />
+          <ScratchpadPanel
+            project={project.id}
+            scratchpads={scratchpads}
+            focusName={focus?.view === "scratchpads" ? focus.name : undefined}
+            focusNonce={focus?.view === "scratchpads" ? focus.nonce : undefined}
+          />
         )}
         {view === "diagrams" && <DiagramPanel project={project.id} diagrams={diagrams} />}
         {view === "timers" && <TimersPanel timers={timers} agents={agents} project={project.id} />}

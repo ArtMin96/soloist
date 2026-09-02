@@ -5,12 +5,22 @@ import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { ProcessActionHandlers } from "@/lib/processActions";
-import type { ProcessView } from "@/domain";
+import type { ProcessView, SessionWork } from "@/domain";
 
 // The emulator hook drives xterm.js against a measured surface jsdom can't provide; stub
 // it so the pane mounts and this test can exercise the title/bell chrome from real events.
 vi.mock("@/components/terminal/useTerminal", () => ({
   useTerminal: () => ({ hostRef: { current: null }, state: "live" as const }),
+}));
+
+// The session-work read model reaches IPC; stubbed here so the header wiring — which arguments
+// reach the hook, and what the pane does with its result — is exercised without a Tauri runtime.
+const useSessionWorkMock =
+  vi.fn<
+    (process: number, enabled: boolean) => { work: SessionWork | null; error: string | null }
+  >();
+vi.mock("@/store/useSessionWork", () => ({
+  useSessionWork: (process: number, enabled: boolean) => useSessionWorkMock(process, enabled),
 }));
 
 import { TerminalPane } from "@/components/terminal/TerminalPane";
@@ -58,7 +68,12 @@ async function flush() {
 afterEach(() => {
   cleanup();
   clearMocks();
+  useSessionWorkMock.mockReset();
+  useSessionWorkMock.mockReturnValue({ work: null, error: null });
 });
+
+// A default so every test not concerned with session work never sees `work` as `undefined`.
+useSessionWorkMock.mockReturnValue({ work: null, error: null });
 
 describe("TerminalPane Trust control", () => {
   const UNTRUSTED: ProcessView = {
@@ -130,5 +145,81 @@ describe("TerminalPane chrome", () => {
       await emit("domain-event", { type: "TerminalBell", id: 7 });
     });
     expect(screen.getByLabelText("Terminal bell")).toBeTruthy();
+  });
+});
+
+const SESSION_WORK: SessionWork = {
+  process: 7,
+  project: 1,
+  todos: [
+    { id: 1, title: "held todo", status: "open", blocked: false, locked: true, access: "worked" },
+  ],
+  scratchpads: [],
+};
+
+// Mirrors the real hook's contract (`work` is `null` while disabled) rather than a fixed return,
+// so a test here proves the pane passes the right `enabled` flag through — not just that the bar
+// renders when told to.
+function stubSessionWork(work: SessionWork) {
+  useSessionWorkMock.mockImplementation((_process, enabled) => ({
+    work: enabled ? work : null,
+    error: null,
+  }));
+}
+
+describe("TerminalPane session work", () => {
+  it("shows the session-work bar for an Agent process", () => {
+    stubSessionWork(SESSION_WORK);
+    renderPane();
+    expect(document.querySelector("[data-session-work]")).not.toBeNull();
+  });
+
+  it("shows nothing for a Command or a Terminal process", () => {
+    stubSessionWork(SESSION_WORK);
+    const command: ProcessView = { ...PROCESS, id: 20, kind: "Command" };
+    const terminal: ProcessView = { ...PROCESS, id: 21, kind: "Terminal" };
+
+    const { rerender } = render(
+      <TooltipProvider>
+        <TerminalPane process={command} handlers={NOOP_HANDLERS} />
+      </TooltipProvider>,
+    );
+    expect(document.querySelector("[data-session-work]")).toBeNull();
+
+    rerender(
+      <TooltipProvider>
+        <TerminalPane process={terminal} handlers={NOOP_HANDLERS} />
+      </TooltipProvider>,
+    );
+    expect(document.querySelector("[data-session-work]")).toBeNull();
+  });
+
+  it("passes enabled: false to the hook for a hidden pooled pane", () => {
+    stubSessionWork(SESSION_WORK);
+    render(
+      <TooltipProvider>
+        <TerminalPane process={PROCESS} visible={false} handlers={NOOP_HANDLERS} />
+      </TooltipProvider>,
+    );
+    expect(document.querySelector("[data-session-work]")).toBeNull();
+    expect(useSessionWorkMock).toHaveBeenCalledWith(PROCESS.id, false);
+  });
+
+  it("keeps the process controls rendered when the bar is full", () => {
+    stubSessionWork({
+      process: 7,
+      project: 1,
+      todos: Array.from({ length: 10 }, (_, index) => ({
+        id: index,
+        title: `todo ${index} with a fairly long title to fill the header row`,
+        status: "open",
+        blocked: false,
+        locked: true,
+        access: "worked",
+      })),
+      scratchpads: [],
+    });
+    renderPane();
+    expect(screen.getByLabelText("Stop")).toBeTruthy();
   });
 });
