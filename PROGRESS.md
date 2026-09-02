@@ -9,6 +9,115 @@
 
 ## Current state
 
+> **LATEST (2026-09-02): TODO WORKSPACE UX — todo pane redesign, agent ↔ todo navigation, and
+> per-run session-work context in agent terminal headers. `Done — pending verify`, uncommitted on
+> `feat/todo-workspace-ux` (branched from `fe648f7`, v0.17.0).** Tracker todos #74–#78 from
+> scratchpad `todo-workspace-ux`. Built as five agent tasks with exclusive file ownership per wave;
+> every new test was observed red against the unfixed behaviour before going green.
+>
+> **Core (#74).** `coordination::SessionActivity` records, per bound `ProcessId`, which todos and
+> scratchpads the process read (`Loaded`: `todo_get`, `todo_comment_list`, `scratchpad_read`, link
+> resolve) or wrote (`Worked`: every session-scoped mutation) through `ScopedFacade` — the one path
+> all agents reach core by, so MCP and IPC record identically and the local UI records nothing.
+> In-memory, capped at `MAX_SESSION_DOCUMENTS_PER_PROCESS = 64` per kind (oldest evicted), `Worked`
+> never downgraded, a repeat access publishes nothing. Cleared on process close through the existing
+> `CompositeLockReleaser` fan-out (same hook as todo locks and trust requests), so `composition.rs`
+> and `build_facade` are untouched. One lean query `Facade::session_work(process)` derives "current
+> work" (locks) from `Todos::list` and "this session" from the registry, dropping any recorded id
+> with no live document; one ids-only `DomainEvent::SessionWorkChanged { process }`. Two existing
+> tests that asserted "exactly one event" after a bound create/write now expect the activity event
+> alongside. Tauri `session_work` command (`facade.blocking`), TS mirror in `domain.ts`, `sessionWork`
+> in `api.ts`, `useSessionWork(process, enabled)` hook (subscribe-before-read, per-frame coalescing,
+> stale-response guard, no subscription while disabled — so pooled hidden panes cost nothing).
+>
+> **Todo pane (#75, #76).** `TodoFilters` + `SegmentedControl` rows replaced by one `TodoToolbar`
+> (shadcn input/select/toggle-group/button + the shared `TagFilterChips`): search, status, All / By
+> scratchpad, `"<shown> of <total>"` count, New todo; wraps within its own header. `BoardView`,
+> `TODO_STATUS_ICON`, `unmetBlockerLabel` live in `lib/todo.ts`. Rows show `#id`, icon + label status
+> (existing semantic tokens only, `data-status` emitted for later CSS), singular/plural unmet-blocker
+> count, scratchpad, tags, comment count; the lock owner is a sibling `Button` of the
+> `CollapsibleTrigger` (no nested interactive) that opens the agent's terminal via the existing
+> `selectProcess`. Stable `data-todo-*` handles replace span-order/badge-variant coupling in
+> `e2e/src/screens/TodoBoard.ts` (public API preserved; `coordination-panels.spec.ts` unchanged, 3/3).
+> **Owner-reported: tags were never visible anywhere** — `todo.tags`/`ScratchpadSummary.tags` reached
+> the webview but only fed the filter chips. New shared read-only `TagList` (`data-tags`/`data-tag`)
+> now renders each item's tags on todo rows and on scratchpad/diagram roster rows (`DocumentList`).
+>
+> **Terminal header (#77).** `SessionWorkBar` on `Agent` panes only, while visible: "Current work"
+> (locked todos) and "This session" (other touched todos + scratchpads), three inline per group, the
+> rest in one `DropdownMenu` overflow; tooltips carry full titles; groups clip rather than spill.
+> Activating an item calls `openOrchestrationItem` in `App.tsx` (reuses `openOrchestration`, sets an
+> `OrchestrationFocus` with a fresh nonce), the pane switches view, `TodoBoard` reveals (clears a
+> hiding filter, expands a collapsed group), expands and DOM-focuses the row; `ScratchpadPanel` opens
+> by name via the existing `editor.open` and focuses the roster row. Both focus effects retry until
+> the target row exists — the real-window walk caught that a freshly mounted pane ran them before its
+> first snapshot.
+>
+> **Evidence (#78).** `cargo test --workspace`: all crates green except the known pre-existing
+> `soloist-pty` red `create_terminal_runs_an_interactive_shell_in_the_project_dir` (tracker #34,
+> crate untouched); `soloist-core` 1297 passed incl. 15 new registry/query tests. `pnpm -C crates/app/ui
+> test`: 180 files / 1366 tests green. `just lint`: green (fmt, clippy -D warnings, tsc, ESLint,
+> Prettier, theme-color check, core-deps, core-cycles, file-size advisory unchanged, schema test).
+> `pnpm -C e2e typecheck`: clean. Real window: `specs/coordination/todo-workspace.spec.ts` **7/7 green**
+> (42 s) after the three defects it caught were fixed (SessionWorkBar overlap, inbound-focus timing,
+> TodoItem meta spilling under the agent control); the lead fixture arm now calls `todo_lock`,
+> `todo_get`, `scratchpad_read` over the real wire, so ids/status/blocker counts, the agent control
+> naming the lead's real process id, Current work / This session, exact return navigation with DOM
+> focus, no horizontal overflow of the board at the 720×480 minimum, and clear-on-stop are all
+> wire-driven. Clear-on-stop mutation-proven (dropping `session_activity` from the releaser fan-out
+> reddened exactly that test after the walk's own vacuous read was fixed). Full suite on the first
+> run: 19/20 spec files green with the new spec at 4/8 before the fixes; the fixed spec was re-run
+> alone. react-doctor: clean on every changed component; two pre-existing warnings on `App.tsx`
+> (complexity 21, >300 lines) unchanged by this branch. Impeccable's hook ran on every UI write.
+>
+> **Decisions.** Status colour stays within existing semantic tokens (DESIGN.md spends saturation on
+> process status only) — `data-status` makes colour a CSS-only change later. Reading a todo's
+> comments counts as loaded. Local-UI writes never record against an agent. Three inline items per
+> header group. Keyboard-Tab traversal is **not** e2e-asserted: the embedded WebDriver dispatches
+> synthetic key events that cannot move focus (recorded in `plan/e2e/e2e-01-screens-and-flows.md`);
+> the separate-tab-stop / no-nested-control guarantee is pinned by `TodoItem.test.tsx`.
+>
+> **Open threads / follow-ups.** (1) The open document's header (`DocumentTitle` via
+> `ScratchpadTitle`/`DiagramTitle`) still shows no tags — needs a `tags` prop threaded through both
+> editors. (2) Pre-existing, measured: at 720×480 with the git rail open the orchestration pane is
+> 184 px wide and its six-segment view switch needs 485 px; ~464 px with the rail closed, still
+> narrower than the switch. Unrelated to this feature; the e2e overflow assertion is scoped to the
+> board. (3) `App.tsx` complexity warnings pre-date this branch. (4) Nothing committed yet.
+>
+> **Next session should start with:** commit the working tree on `feat/todo-workspace-ux` (one
+> coherent change; the owner decides the stacked-PR split), open the PR against `main`, then run the
+> owner's visual pass in `just dev-alongside` (toolbar wrap at narrow pane widths, row tags, the
+> session-work bar with an agent that has locked/read documents, both navigation directions) before
+> moving #74–#78 to `Verified`. Then pick up follow-ups (1) and (2) above as their own small PRs.
+
+> **LATEST (2026-08-31): LOCAL-CLI INTER-AGENT COLLABORATION RESEARCH — comprehensive
+> replacement-oriented report complete; docs-only, no phase status changed.** The report is
+> [`docs/research/local-cli-inter-agent-collaboration.md`](docs/research/local-cli-inter-agent-collaboration.md)
+> (6,688 words, 64 unique primary-source links). It covers Claude Code, Codex, Gemini, Kimi, Amp,
+> OpenCode, GitHub Copilot CLI, and Generic tools against Soloist's exact constraints: users'
+> installed CLIs and existing setup/subscriptions, heterogeneous local teams, standardized
+> send/receive/acknowledge, and no provider credential brokerage.
+>
+> **Decision established by the evidence:** do not repair the current idle-gated PTY wake path.
+> `AgentMailbox::wake` ultimately reaches `PtyIo::write_all`; that is terminal input, not a provider
+> session protocol, and the current real-window tests use synthetic IPC-polling agents rather than
+> live Claude/Codex/Gemini/Kimi processes. Retain the bounded mailbox, authenticated scope, lineage,
+> list/get/ack, completion correlation, transcript, and timer scheduling; replace autonomous
+> message/timer/onboarding delivery with a durable collaboration broker plus capability-probed
+> provider Turn Adapters. ACP is a reusable southbound adapter where implemented, MCP remains the
+> agent-facing pull/ack plane, and A2A is a possible future external boundary but the wrong internal
+> layer for installed local CLIs. **No PTY fallback.**
+>
+> **Provider gates:** prototype Kimi ACP, Copilot SDK, and Codex app-server/exec first. Codex
+> app-server is rich but experimental; Kimi Web is optional/experimental behind ACP; Gemini/OpenCode/
+> Amp require installed-version conformance probes; Generic requires an explicit semantic transport
+> profile. Claude managed-team mode is **blocked** pending explicit Anthropic approval because the
+> technically suitable Agent SDK path conflicts with the subscription-reuse constraint under
+> Anthropic's published product policy; Channels fit the authenticated CLI better but remain a
+> no-receipt research preview. Google policy for this exact cached-subscription orchestration also
+> needs a recorded answer before Gemini GA. The active implementation work remains the bounded-file-
+> watching branch below; this research changed no source or phase status.
+
 > **LATEST (2026-08-28): BOUNDED PROJECT FILE WATCHING — twenty-two commits through `17f7fc5` on
 > `fix/bounded-project-file-watching`, PR #198, `Done — pending verify`. Measured on real hardware:
 > **57,596 watches / 8 inotify instances → 255 / 1** (~226x), dev build of this branch running
@@ -3831,6 +3940,33 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 
 ## Decisions / changes this session
 
+### Local CLI inter-agent collaboration research — replace PTY injection (2026-08-31, docs-only)
+
+- Produced [`docs/research/local-cli-inter-agent-collaboration.md`](docs/research/local-cli-inter-agent-collaboration.md):
+  525 lines / 6,688 words / 64 unique primary-source links. Research ran through delegated agents
+  against official provider docs, official repositories/source/issues, ACP/MCP/A2A specifications,
+  plus a separate adversarial source pass and a read-only audit of the current Soloist path.
+- Diagnosed the exact current failure: O13/O15 and timer wake delivery use heuristic idle state, then
+  `Supervisor::try_submit_turn`, then the PTY input channel and real `write_all`. The UI labels the
+  resulting `WakeSubmitted` as "Delivered," even though only a local terminal-input channel accepted
+  bytes. The E2E fixtures directly poll IPC and acknowledge messages; they do not establish delivery
+  into a real provider conversation.
+- Recommended a two-plane replacement: a durable C6 Collaboration Broker owns teams, stable
+  participants, messages, delivery evidence, retries, acknowledgements and audit; a C4-owned
+  `AgentTurnDriver` registry maps normalized session/turn operations onto each provider's supported
+  semantic control surface. Interactive PTY agents and managed team agents become distinct modes.
+- Provider conclusions: Codex app-server with `exec --json`/resume fallback; Kimi ACP with optional
+  experimental Web; Gemini ACP with live defect/policy gates; Amp streaming JSON; OpenCode local
+  server/SDK with ACP fallback; GA Copilot SDK with ACP fallback; Generic only through a declared
+  conformance-tested protocol. Claude's Agent SDK is technically suitable but subscription-backed
+  product use is blocked pending Anthropic approval; Channels are preview-only and carry no receipt.
+- Protocol conclusions: ACP is client-to-agent control, MCP is the model-facing coordination pull/ack
+  surface, and A2A is technically possible but does not remove the provider last-mile adapters and
+  adds the wrong network/discovery/task-server layer for this local product.
+- No code/tests were run or changed. Verification was report self-review, Markdown structure review,
+  citation count, and the independent contradiction pass. Existing user/untracked changes were left
+  untouched.
+
 ### Bounded file watching — the review-fix pass (2026-08-28) — `Done — pending verify`
 
 A two-axis code review (Standards + Spec, parallel sub-agents) ran against
@@ -6716,6 +6852,13 @@ review's one should-fix + the mechanical nits:
 
 ## Open threads / unresolved
 
+- **Managed-agent delivery replacement (2026-08-31):** owner review/scheduling is required before
+  implementation. The report recommends prototypes and live conformance gates before architecture
+  commits; do not extend the PTY wake path meanwhile.
+- **Provider policy gates:** obtain explicit Anthropic approval for subscription-backed Claude managed
+  sessions and a recorded Google answer for the exact cached-subscription Gemini ACP use. Technical
+  success is not product authorization.
+
 - **Phase-5 runtime echo/control gate — CLOSED by a real human click (2026-06-19), R2 unblocked.** The user
   ran `just dev` (host `DISPLAY=:0`), selected the `shell` process in the sidebar, clicked its **per-row Start**,
   typed `echo hi` → it **started and echoed**. So the control wiring, the core start path, and the one untested
@@ -6982,6 +7125,14 @@ has a `GripVertical` icon. Both reviewers flagged it as "fine if deliberate"; le
   Rust and no supervisor/PTY behaviour.
 
 ## Next session should start with
+
+**◆ LOCAL-CLI COLLABORATION RESEARCH (2026-08-31, docs-only):** review
+[`docs/research/local-cli-inter-agent-collaboration.md`](docs/research/local-cli-inter-agent-collaboration.md)
+and decide whether to schedule the recommended replacement track. If approved, begin only with the
+Wave-0 policy questions and black-box prototypes for Kimi ACP, Copilot SDK, and Codex app-server/exec;
+do not modify C6/O13/O15/O16 until those prototypes establish the normalized adapter contract. The
+existing bounded-file-watching branch remains the active implementation work and keeps its next steps
+below.
 
 **◆ NEWEST (2026-08-28) — shadcn adoption pass + working-agent shimmer, branch
 `feat/shadcn-adoption-and-working-shimmer`, stacked on PR #196's branch.**
