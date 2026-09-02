@@ -19,7 +19,7 @@ use crate::composition::CorePorts;
 use crate::config::ConfigEngine;
 use crate::configchange::{ConfigSync, TrustReviewCommand};
 use crate::coordination::{
-    AgentMailbox, Diagrams, Kv, Leases, Scratchpads, Templates, Timers, Todos,
+    AgentMailbox, Diagrams, Kv, Leases, Scratchpads, SessionActivity, Templates, Timers, Todos,
 };
 use crate::events::{DomainEvent, EventBus};
 use crate::filewatch::WatchStatus;
@@ -83,6 +83,7 @@ mod scoped_trust;
 mod scratchpad;
 mod seed_template;
 mod session;
+mod session_work;
 mod settings;
 mod support;
 mod template;
@@ -153,6 +154,7 @@ pub struct Facade {
     todos: Todos,
     templates: Arc<Templates>,
     trust_requests: Arc<TrustRequests>,
+    session_activity: Arc<SessionActivity>,
     settings: Arc<SettingsStore<(), Settings>>,
     project_settings: Arc<SettingsStore<ProjectId, ProjectSettings>>,
     feedback: Feedback,
@@ -171,10 +173,15 @@ impl Facade {
         // unanswered requests with it — so the hook the composition root supplied is extended with
         // it rather than replaced.
         let trust_requests = Arc::new(TrustRequests::new(ports.clock.clone(), bus.clone()));
+        // The session-activity registry is a close hook for the identical reason: a process's
+        // recorded accesses are meaningful only for its own run, so the same fan-out that clears a
+        // closed process's trust requests also forgets what it read or wrote.
+        let session_activity = Arc::new(SessionActivity::new(bus.clone()));
         let mut supervisor_ports = ports.supervisor_ports();
         supervisor_ports.locks = Arc::new(CompositeLockReleaser::new(vec![
             supervisor_ports.locks,
             trust_requests.clone(),
+            session_activity.clone(),
         ]));
         // The resolver the supervisor was handed is the one the agents context drafts through, so a
         // spawn and a headless run share a single capture of the user's shell.
@@ -240,6 +247,7 @@ impl Facade {
             todos: Todos::new(todo_repo),
             templates: Arc::new(Templates::new(template_repo)),
             trust_requests,
+            session_activity,
             settings: Arc::new(SettingsStore::new(settings_repo)),
             project_settings: Arc::new(SettingsStore::new(project_settings_repo)),
             feedback: Feedback::new(feedback_repo, clock.clone()),

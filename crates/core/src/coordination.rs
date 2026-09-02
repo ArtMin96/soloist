@@ -30,6 +30,7 @@ mod scheduler;
 mod scratchpad;
 mod scratchpad_link;
 mod scratchpad_repo;
+mod session_activity;
 mod template;
 mod template_evictor;
 mod template_render;
@@ -79,6 +80,7 @@ pub use scratchpad_repo::{
     NoopScratchpadRepo, RenameResult, ScratchpadRepo, StoredScratchpad, TransferResult,
     TransferredScratchpad, WriteResult,
 };
+pub use session_activity::{AccessKind, SessionActivity, MAX_SESSION_DOCUMENTS_PER_PROCESS};
 pub use template::{
     placeholders, ExportedTemplate, SeedTemplate, TemplateSummary, TemplateView,
     TemplateWriteError, Templates, MAX_PLACEHOLDERS_PER_BODY, MAX_RENDERED_PROMPT,
