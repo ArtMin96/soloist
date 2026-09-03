@@ -9,7 +9,84 @@
 
 ## Current state
 
-> **NEWEST (2026-09-03): REGION LOADING SYSTEM + HONEST TODO PANE LOADING — `Done — pending verify`,
+> **NEWEST (2026-09-03): PROSE STAND-IN — TODO DETAIL OPENS ON THE CLICK — `Done — pending verify`,
+> uncommitted on `feat/todo-workspace-ux` over `d09c029`.**
+> Clicking a todo row took noticeably long before the detail panel began sliding in. The cause was
+> read out of the code rather than guessed, and it is not a fetch: `TodoView` already carries
+> `doc.body` and the comments, so the detail waits on no read. The cost is rendering. The body and
+> every comment mount `MarkdownView`, which is `LazyRichTextEditor` then `RichTextEditor` with
+> `useEditor({ immediatelyRender: false })`; each editor is built in one effect and seeded with its
+> Markdown in a second. React flushes a click-triggered (discrete) render's passive effects
+> synchronously before paint, so all N+1 editors were built before the route flip painted, and the
+> prose area sat blank across the chunk load, the editor creation and the seeding.
+>
+> **The parts** (all under `crates/app/ui/src`). `components/common/LoadingStandIn.tsx` is new: the
+> one wrapper meaning "this is not the content yet", carrying `aria-busy`, plus `role="status"` and an
+> sr-only "Loading {label}" only when a label is given, plus `animate-skeleton-reveal`.
+> `LoadableRegion`'s loading branch now routes through it and `LoadableRegion.test.tsx` stayed
+> unchanged and green, so reveal timing and the announcement live in exactly one file and a region and
+> an inline body wait identically. `components/editor/MarkdownSkeleton.tsx` is new: prose-line bars
+> whose count comes from the text (`CHARS_PER_LINE` 72, never fewer than the written lines, floor 1,
+> cap 8), cycling widths and a short closing line. `components/editor/MarkdownView.tsx` was rewritten
+> around the two. Because the fix lives in `MarkdownView`, which is the leaf every rendered-Markdown
+> surface goes through, all of them inherit it: the todo body, todo comments, PR review comments,
+> template previews and the scratchpad reading views.
+>
+> **The mechanism (React 19).** `MarkdownView` calls `useDeferredValue(true, false)`, whose initial
+> value makes the mounting render return `false` and the background pass after it return `true`, so
+> the editor is left out of the frame the click commits and mounted on the pass after it; the panel
+> moves at once. `RichTextEditor` gained an optional `onReady`, read through `useLatestRef` like its
+> other callbacks and fired once at the end of the existing seed effect. Until that fires,
+> `MarkdownView` holds a single `LoadingStandIn` around a `MarkdownSkeleton` and mounts the editor
+> invisibly beneath it (`invisible absolute inset-x-0 top-0`, so `visibility: hidden` keeps it in
+> layout and a block that measures itself while rendering already has its width). That is one
+> continuous wait instead of a blank frame, and the reveal never restarts across the chunk-load and
+> editor-creation gaps. The old `fallback` prop is gone.
+>
+> **Announce or stay silent.** A body announces its wait when it is the whole of a region and says
+> nothing when the structure around it already reads. `MarkdownView` takes `announce` (default true),
+> and `components/orchestration/CommentList.tsx` and `components/git/ReviewThreadList.tsx` pass
+> `announce={false}` for comment bodies sitting under their author lines, so a thread of ten bodies
+> does not announce ten waits.
+>
+> **Evidence.** Two agents: one Opus implementer holding an exclusive write set over the files above,
+> then one gate and ledger pass. The implementer also ran Prettier across `DESIGN.md`, which
+> reformatted the whole document; the coordinator reverted that and kept only the intended paragraph,
+> so `DESIGN.md`'s diff is one new paragraph under R7.7b describing rendered Markdown as the leaf case
+> of the region rule, `LoadingStandIn` as the shared wrapper, and the announce/silent rule.
+> `components/editor/MarkdownView.test.tsx` is new and carries three tests: the stand-in is held with
+> the box busy until the editor reports ready and is then swapped for the prose; an unannounced body
+> is busy but silent; a longer body draws more stand-in lines and stops at the cap. The first was
+> observed red against the old `MarkdownView` before the rewrite, failing because no `aria-busy`
+> element existed.
+>
+> Gates, run once from the repo root: `pnpm -C crates/app/ui typecheck` (`tsc --noEmit`) clean;
+> `pnpm -C crates/app/ui lint` (`eslint .`) clean; `pnpm -C crates/app/ui run format:check` clean
+> ("All matched files use Prettier code style"); `pnpm -C crates/app/ui test` **191 files / 1452 tests
+> passed, 0 failed** (nothing timed out, including the `TodoBoard` search test that timed out under
+> full-suite load last session); `node scripts/check-theme-colors.mjs` clean;
+> `./scripts/check-file-size.sh` clean (its advisory over-400-line report lists 26 files, none of them
+> in this change set). React Doctor (`npx react-doctor@latest --verbose --scope changed`, 101 files)
+> scored **82/100 with 42 warnings**, and not one of them is in a file this change set touched: every
+> finding sits in a file absent from `git diff --name-only`, 38 of them the branch-wide
+> `react-compiler-no-manual-memoization` pattern already recorded below. Nothing was red, so nothing
+> was fixed. The cargo gates were not run because `git diff --stat` shows no Rust file in the change
+> set.
+>
+> **Not verified.** There has been no live Tauri window pass: neither the click-to-slide improvement
+> nor the stand-in's visual pitch against real prose has been seen in WebKitGTK. The stand-in's height
+> is an estimate from the text's length, so a swap still shifts layout when the estimate is off.
+> `LazyRichTextEditor`'s bordered `DEFAULT_FALLBACK` still serves the editable surfaces (the scratchpad
+> and todo editors) and is not yet a `MarkdownSkeleton`.
+>
+> **Next session should start with:** one bounded `just dev-alongside` pass opening a todo with a long
+> body and several comments, confirming the panel slides on the click, that the prose stand-in only
+> shows when rendering takes longer than about 150ms, that the bars sit at the prose's line pitch, and
+> that the swap does not jump the reading position. Then give `LazyRichTextEditor`'s editable surfaces
+> a mirrored stand-in, and migrate the git hooks and `usePersistentSnapshot` to `Loadable` plus
+> `LoadableRegion`. Then commit this slice and update the `feat/todo-workspace-ux` PR.
+
+> **LATEST (2026-09-03): REGION LOADING SYSTEM + HONEST TODO PANE LOADING — `Done — pending verify`,
 > uncommitted on `feat/todo-workspace-ux`.**
 > `useOrchestration` returned an empty snapshot until the `orchestrationSnapshot` IPC resolved, so
 > `OrchestrationPane` handed that empty model to `TodoBoard` and the pane painted "No todos yet" for
@@ -4104,6 +4181,11 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
   a promise cache and would become a second data paradigm beside the one every store hook already
   uses. React concurrency is used where it pays instead, `startTransition` on the snapshot commit and
   `useDeferredValue` on the view switch.
+- **Rendered Markdown is the leaf case of the same rule.** `MarkdownView` defers its editor by one
+  pass (`useDeferredValue` with an initial value) so a click paints without it, and stands in for
+  itself with prose lines through the shared `LoadingStandIn` until the editor reports its content
+  seeded. A comment body under an author line waits silently (`announce={false}`); a body that is the
+  whole of a region names its wait.
 
 ### Frontend performance essentials + design-standard rewrite (2026-09-03) — `Done — pending verify`
 
