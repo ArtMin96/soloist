@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { useEditorState, type Editor } from "@tiptap/react";
 import { cn } from "@/lib/utils";
 import { useScrollSpy } from "@/store/useScrollSpy";
@@ -57,26 +57,54 @@ export function EditorOutline({ editor }: { editor: Editor }) {
   return <OutlineRail editor={editor} headings={headings} />;
 }
 
+/** What the rail reads off the DOM ProseMirror renders: the scroll container and the heading nodes. */
+interface RenderedHeadings {
+  container: HTMLElement | null;
+  targets: HTMLElement[];
+}
+
+const NO_RENDERED_HEADINGS: RenderedHeadings = { container: null, targets: [] };
+
+// Reads the headings ProseMirror has actually painted into `editor.view.dom` — its own DOM subtree,
+// written outside React's render cycle, so the model's `headingCount` alone cannot say when the DOM
+// has caught up with it. `useSyncExternalStore` is what makes this reactive to that: the "update"
+// event is ProseMirror's own signal that its DOM just changed, and the cached snapshot keeps
+// `targets`/`container` referentially stable across reads that found nothing new, so the rail does
+// not re-render itself over a change elsewhere in the note.
+function useRenderedHeadings(editor: Editor, headingCount: number): RenderedHeadings {
+  const cacheRef = useRef(NO_RENDERED_HEADINGS);
+
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => {
+      editor.on("update", onStoreChange);
+      return () => void editor.off("update", onStoreChange);
+    },
+    [editor],
+  );
+
+  const getSnapshot = useCallback((): RenderedHeadings => {
+    const root = editor.view.dom;
+    const container = root.closest<HTMLElement>(SCROLL_CONTAINER_SELECTOR);
+    // Trimming to the model's count keeps the two indexed by the same range even mid-commit.
+    const targets = Array.from(root.querySelectorAll<HTMLElement>(HEADING_SELECTOR)).slice(
+      0,
+      headingCount,
+    );
+    const cached = cacheRef.current;
+    if (cached.container !== container || !sameElements(cached.targets, targets)) {
+      cacheRef.current = { container, targets };
+    }
+    return cacheRef.current;
+  }, [editor, headingCount]);
+
+  return useSyncExternalStore(subscribe, getSnapshot);
+}
+
 // The rail proper, mounted only when there is an outline to show — so a note without one never pays
 // for the observers that track the reading position.
 function OutlineRail({ editor, headings }: { editor: Editor; headings: OutlineEntry[] }) {
-  const [container, setContainer] = useState<HTMLElement | null>(null);
-  const [targets, setTargets] = useState<HTMLElement[]>([]);
+  const { container, targets } = useRenderedHeadings(editor, headings.length);
   const activeRowRef = useRef<HTMLLIElement>(null);
-
-  // Re-read the rendered headings after every commit: ProseMirror has already written them to the
-  // DOM by the time React runs this, so the DOM order matches the model order. Trimming to the model's
-  // count keeps the two indexed by the same range even mid-commit, and returning the previous array
-  // when nothing moved keeps `targets` stable for the spy.
-  useLayoutEffect(() => {
-    const root = editor.view.dom;
-    setContainer(root.closest<HTMLElement>(SCROLL_CONTAINER_SELECTOR));
-    const rendered = Array.from(root.querySelectorAll<HTMLElement>(HEADING_SELECTOR)).slice(
-      0,
-      headings.length,
-    );
-    setTargets((previous) => (sameElements(previous, rendered) ? previous : rendered));
-  }, [editor, headings]);
 
   const { activeIndex, scrollToTarget, remeasure } = useScrollSpy(container, targets);
 

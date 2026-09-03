@@ -37,12 +37,15 @@ pub(crate) async fn run(
         )
         .await?,
     )?;
+    // The one todo derived from the scratchpad above: the link is made here, over the wire, so the
+    // detail panel naming that document is the core carrying an agent's own association through —
+    // never a name the window could have had to hand.
     let blocked = todo_id(
         request(
             stream,
             IpcRequest::TodoCreate {
                 doc: todo_doc(&plan.blocked),
-                scratchpad: None,
+                scratchpad: Some(plan.scratchpad.clone()),
             },
         )
         .await?,
@@ -75,6 +78,31 @@ pub(crate) async fn run(
     )
     .await?;
     println!("lead seeded a blocker chain and a comment");
+
+    // A second chain with two unmet blockers, so the board has both a singular and a plural
+    // unmet-blocker count to show from the same wire-built state.
+    request(
+        stream,
+        IpcRequest::TodoSetBlockers {
+            todo: commented,
+            blockers: vec![blocker, blocked],
+        },
+    )
+    .await?;
+
+    // The session-work context the agent terminal header renders is recorded by the core from
+    // these tool calls: the lock is what "Current work" derives from, and a read through a tool is
+    // what "This session" is made of.
+    request(stream, IpcRequest::TodoLock { todo: blocked }).await?;
+    request(stream, IpcRequest::TodoGet { todo: commented }).await?;
+    request(
+        stream,
+        IpcRequest::ScratchpadRead {
+            name: plan.scratchpad.clone(),
+        },
+    )
+    .await?;
+    println!("lead locked a todo and read a todo and the scratchpad");
 
     let rewrite = data_dir.join(SCRATCHPAD_REWRITE_FILE);
     while !rewrite.exists() {

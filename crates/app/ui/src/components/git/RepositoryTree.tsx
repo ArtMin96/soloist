@@ -1,6 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { hotkeysCoreFeature, selectionFeature, syncDataLoaderFeature } from "@headless-tree/core";
-import { useTree } from "@headless-tree/react";
+// The item instances `useTree` hands out are stable-identity but mutate internally, so the
+// compiler-safe entrypoint returns a getter instead of the instance itself — every access below
+// calls `tree()` fresh rather than memoizing against an identity that never changes.
+import { useTree } from "@headless-tree/react/react-compiler";
 import { FileTreeIcon } from "@/components/git/FileTreeIcon";
 import { Tree, TreeItem, TreeItemChevron, TREE_INDENT } from "@/components/ui/tree";
 import { type Tree as RepositoryTreeData, type TreeNode } from "@/store/git/tree";
@@ -52,7 +55,21 @@ export function RepositoryTree({
 }: RepositoryTreeProps) {
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
 
-  const tree = useTree<TreeNode>({
+  // A path that is gone can still be named by the retained selection; dropping it here, the render
+  // `data` itself changed in, keeps the tree from holding a growing list of paths that no longer
+  // exist. Tracked against `data`'s own identity rather than an effect so a repository that changed
+  // out from under the tree never paints a stale selection first.
+  const [prunedFor, setPrunedFor] = useState(data);
+  if (prunedFor !== data) {
+    setPrunedFor(data);
+    const present = new Set(Object.keys(data.nodes));
+    setSelectedItems((paths) => {
+      const kept = paths.filter((path) => present.has(path));
+      return kept.length === paths.length ? paths : kept;
+    });
+  }
+
+  const getTree = useTree<TreeNode>({
     rootItemId: ROOT,
     state: { expandedItems: expanded, selectedItems },
     setExpandedItems: onExpandedChange,
@@ -72,29 +89,27 @@ export function RepositoryTree({
     features: [syncDataLoaderFeature, selectionFeature, hotkeysCoreFeature],
   });
 
+  // `getTree` is a fresh closure every render — only what it resolves to is stable — so the
+  // rebuild effect closes over the resolved instance rather than the closure, or it would refire
+  // (and push a new state object) on every render instead of only when `data` changes.
+  const treeInstance = getTree();
   useEffect(() => {
     // The tree caches the shape it last walked, so a repository that changed under it has to be
     // walked again — otherwise a path that appeared would not show until something else moved.
-    tree.rebuildTree();
-
-    // A path that is gone can still be named by the retained selection; dropping it keeps the tree
-    // from holding a growing list of paths that no longer exist.
-    const present = new Set(Object.keys(data.nodes));
-    setSelectedItems((paths) => {
-      const kept = paths.filter((path) => present.has(path));
-      return kept.length === paths.length ? paths : kept;
-    });
-  }, [tree, data]);
+    treeInstance.rebuildTree();
+  }, [treeInstance, data]);
 
   return (
-    <Tree tree={tree} aria-label={label} className="px-1.5 py-1.5">
-      {tree.getItems().map((item) => (
-        <TreeItem key={item.getId()} item={item}>
-          <TreeItemChevron item={item} />
-          <FileTreeIcon node={item.getItemData()} expanded={item.isExpanded()} />
-          {row(item.getItemData())}
-        </TreeItem>
-      ))}
+    <Tree tree={getTree()} aria-label={label} className="px-1.5 py-1.5">
+      {getTree()
+        .getItems()
+        .map((item) => (
+          <TreeItem key={item.getId()} item={item}>
+            <TreeItemChevron item={item} />
+            <FileTreeIcon node={item.getItemData()} expanded={item.isExpanded()} />
+            {row(item.getItemData())}
+          </TreeItem>
+        ))}
     </Tree>
   );
 }

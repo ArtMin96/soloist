@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ThemeExtensions } from "@/domain";
 import { BUILT_IN_THEMES } from "@/theme/catalog";
+import { markBackgrounds } from "@/theme/derive";
 import { appliedThemeFromFile } from "@/theme/runtime";
 
 function luminance(hex: string): number {
@@ -37,15 +38,10 @@ const STATUS_GRAPHIC_ROLES = [
 ] as const satisfies ReadonlyArray<keyof ThemeExtensions>;
 
 describe("derived Soloist theme contrast", () => {
-  it.each(BUILT_IN_THEMES)("keeps $name git text readable in its rail states", (source) => {
+  it.each(BUILT_IN_THEMES)("keeps $name git text readable on every ground it marks", (source) => {
     const theme = appliedThemeFromFile(source, source.appearance);
     if (!theme) throw new Error(`Could not apply ${source.id}`);
-    const backgrounds = [
-      theme.colors.sidebar,
-      theme.colors.sidebarRowHover,
-      theme.colors.sidebarRowActive,
-      theme.colors.sidebarRowSelected,
-    ];
+    const backgrounds = markBackgrounds(theme.colors);
 
     for (const role of GIT_TEXT_ROLES) {
       for (const background of backgrounds) {
@@ -57,17 +53,12 @@ describe("derived Soloist theme contrast", () => {
     }
   });
 
-  it.each(BUILT_IN_THEMES.filter(({ extensions }) => !extensions?.soloist))(
-    "keeps derived $name status marks distinguishable in its rail states",
+  it.each(BUILT_IN_THEMES)(
+    "keeps $name status marks distinguishable on every ground they mark",
     (source) => {
       const theme = appliedThemeFromFile(source, source.appearance);
       if (!theme) throw new Error(`Could not apply ${source.id}`);
-      const backgrounds = [
-        theme.colors.sidebar,
-        theme.colors.sidebarRowHover,
-        theme.colors.sidebarRowActive,
-        theme.colors.sidebarRowSelected,
-      ];
+      const backgrounds = markBackgrounds(theme.colors);
 
       for (const role of STATUS_GRAPHIC_ROLES) {
         for (const background of backgrounds) {
@@ -85,12 +76,7 @@ describe("derived Soloist theme contrast", () => {
     if (!source) throw new Error("Missing Soloist Default");
     const theme = appliedThemeFromFile(source, "dark");
     if (!theme) throw new Error("Could not apply Soloist Default dark");
-    const backgrounds = [
-      theme.colors.sidebar,
-      theme.colors.sidebarRowHover,
-      theme.colors.sidebarRowActive,
-      theme.colors.sidebarRowSelected,
-    ];
+    const backgrounds = markBackgrounds(theme.colors);
 
     for (const role of GIT_TEXT_ROLES) {
       for (const background of backgrounds) {

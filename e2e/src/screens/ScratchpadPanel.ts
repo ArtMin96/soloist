@@ -33,6 +33,12 @@ const CONFLICT = '[role="alert"]';
 // save flush. Even if the chord were dropped, the autosave debounce is the backstop that still saves.
 const CONTROL = "\uE009";
 
+/** The roster row holding DOM focus: its name handle, and whether it is the selected one. */
+interface FocusedRow {
+  name: string;
+  selected: boolean;
+}
+
 /** One scratchpad as the roster summarises it. */
 interface RosterRow {
   name: string;
@@ -230,6 +236,40 @@ export const scratchpadPanel = {
         timeoutMsg: "the conflict banner never cleared after Reload",
       },
     );
+  },
+
+  /**
+   * The roster row holding DOM focus, or `null` when focus is anywhere else — the landing spot
+   * inbound navigation (a terminal header's session-work item) is asserted against, read off the
+   * real focused element and the row's own `aria-selected`.
+   */
+  async focused(): Promise<FocusedRow | null> {
+    return browser.execute(
+      (optionSel: string, nameAttr: string) => {
+        const row = document.activeElement?.closest(optionSel);
+        if (!row) return null;
+        return {
+          name: row.getAttribute(nameAttr) ?? "",
+          selected: row.getAttribute("aria-selected") === "true",
+        };
+      },
+      OPTION,
+      NAME_ATTR,
+    );
+  },
+
+  /** Waits until the roster row named `name` holds DOM focus, then returns what it reports. */
+  async waitForFocused(name: string): Promise<FocusedRow> {
+    let last: FocusedRow | null = null;
+    await waitUntilOr(
+      async () => {
+        last = await this.focused();
+        return last?.name === name;
+      },
+      () =>
+        `focus never landed on scratchpad "${name}"; last focused row: ${JSON.stringify(last)}`,
+    );
+    return last as unknown as FocusedRow;
   },
 
   /**

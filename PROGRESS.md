@@ -9,6 +9,341 @@
 
 ## Current state
 
+> **NEWEST (2026-09-03): PROSE STAND-IN — TODO DETAIL OPENS ON THE CLICK — `Done — pending verify`,
+> uncommitted on `feat/todo-workspace-ux` over `d09c029`.**
+> Clicking a todo row took noticeably long before the detail panel began sliding in. The cause was
+> read out of the code rather than guessed, and it is not a fetch: `TodoView` already carries
+> `doc.body` and the comments, so the detail waits on no read. The cost is rendering. The body and
+> every comment mount `MarkdownView`, which is `LazyRichTextEditor` then `RichTextEditor` with
+> `useEditor({ immediatelyRender: false })`; each editor is built in one effect and seeded with its
+> Markdown in a second. React flushes a click-triggered (discrete) render's passive effects
+> synchronously before paint, so all N+1 editors were built before the route flip painted, and the
+> prose area sat blank across the chunk load, the editor creation and the seeding.
+>
+> **The parts** (all under `crates/app/ui/src`). `components/common/LoadingStandIn.tsx` is new: the
+> one wrapper meaning "this is not the content yet", carrying `aria-busy`, plus `role="status"` and an
+> sr-only "Loading {label}" only when a label is given, plus `animate-skeleton-reveal`.
+> `LoadableRegion`'s loading branch now routes through it and `LoadableRegion.test.tsx` stayed
+> unchanged and green, so reveal timing and the announcement live in exactly one file and a region and
+> an inline body wait identically. `components/editor/MarkdownSkeleton.tsx` is new: prose-line bars
+> whose count comes from the text (`CHARS_PER_LINE` 72, never fewer than the written lines, floor 1,
+> cap 8), cycling widths and a short closing line. `components/editor/MarkdownView.tsx` was rewritten
+> around the two. Because the fix lives in `MarkdownView`, which is the leaf every rendered-Markdown
+> surface goes through, all of them inherit it: the todo body, todo comments, PR review comments,
+> template previews and the scratchpad reading views.
+>
+> **The mechanism (React 19).** `MarkdownView` calls `useDeferredValue(true, false)`, whose initial
+> value makes the mounting render return `false` and the background pass after it return `true`, so
+> the editor is left out of the frame the click commits and mounted on the pass after it; the panel
+> moves at once. `RichTextEditor` gained an optional `onReady`, read through `useLatestRef` like its
+> other callbacks and fired once at the end of the existing seed effect. Until that fires,
+> `MarkdownView` holds a single `LoadingStandIn` around a `MarkdownSkeleton` and mounts the editor
+> invisibly beneath it (`invisible absolute inset-x-0 top-0`, so `visibility: hidden` keeps it in
+> layout and a block that measures itself while rendering already has its width). That is one
+> continuous wait instead of a blank frame, and the reveal never restarts across the chunk-load and
+> editor-creation gaps. The old `fallback` prop is gone.
+>
+> **Announce or stay silent.** A body announces its wait when it is the whole of a region and says
+> nothing when the structure around it already reads. `MarkdownView` takes `announce` (default true),
+> and `components/orchestration/CommentList.tsx` and `components/git/ReviewThreadList.tsx` pass
+> `announce={false}` for comment bodies sitting under their author lines, so a thread of ten bodies
+> does not announce ten waits.
+>
+> **Evidence.** Two agents: one Opus implementer holding an exclusive write set over the files above,
+> then one gate and ledger pass. The implementer also ran Prettier across `DESIGN.md`, which
+> reformatted the whole document; the coordinator reverted that and kept only the intended paragraph,
+> so `DESIGN.md`'s diff is one new paragraph under R7.7b describing rendered Markdown as the leaf case
+> of the region rule, `LoadingStandIn` as the shared wrapper, and the announce/silent rule.
+> `components/editor/MarkdownView.test.tsx` is new and carries three tests: the stand-in is held with
+> the box busy until the editor reports ready and is then swapped for the prose; an unannounced body
+> is busy but silent; a longer body draws more stand-in lines and stops at the cap. The first was
+> observed red against the old `MarkdownView` before the rewrite, failing because no `aria-busy`
+> element existed.
+>
+> Gates, run once from the repo root: `pnpm -C crates/app/ui typecheck` (`tsc --noEmit`) clean;
+> `pnpm -C crates/app/ui lint` (`eslint .`) clean; `pnpm -C crates/app/ui run format:check` clean
+> ("All matched files use Prettier code style"); `pnpm -C crates/app/ui test` **191 files / 1452 tests
+> passed, 0 failed** (nothing timed out, including the `TodoBoard` search test that timed out under
+> full-suite load last session); `node scripts/check-theme-colors.mjs` clean;
+> `./scripts/check-file-size.sh` clean (its advisory over-400-line report lists 26 files, none of them
+> in this change set). React Doctor (`npx react-doctor@latest --verbose --scope changed`, 101 files)
+> scored **82/100 with 42 warnings**, and not one of them is in a file this change set touched: every
+> finding sits in a file absent from `git diff --name-only`, 38 of them the branch-wide
+> `react-compiler-no-manual-memoization` pattern already recorded below. Nothing was red, so nothing
+> was fixed. The cargo gates were not run because `git diff --stat` shows no Rust file in the change
+> set.
+>
+> **Not verified.** There has been no live Tauri window pass: neither the click-to-slide improvement
+> nor the stand-in's visual pitch against real prose has been seen in WebKitGTK. The stand-in's height
+> is an estimate from the text's length, so a swap still shifts layout when the estimate is off.
+> `LazyRichTextEditor`'s bordered `DEFAULT_FALLBACK` still serves the editable surfaces (the scratchpad
+> and todo editors) and is not yet a `MarkdownSkeleton`.
+>
+> **Next session should start with:** one bounded `just dev-alongside` pass opening a todo with a long
+> body and several comments, confirming the panel slides on the click, that the prose stand-in only
+> shows when rendering takes longer than about 150ms, that the bars sit at the prose's line pitch, and
+> that the swap does not jump the reading position. Then give `LazyRichTextEditor`'s editable surfaces
+> a mirrored stand-in, and migrate the git hooks and `usePersistentSnapshot` to `Loadable` plus
+> `LoadableRegion`. Then commit this slice and update the `feat/todo-workspace-ux` PR.
+
+> **LATEST (2026-09-03): REGION LOADING SYSTEM + HONEST TODO PANE LOADING — `Done — pending verify`,
+> uncommitted on `feat/todo-workspace-ux`.**
+> `useOrchestration` returned an empty snapshot until the `orchestrationSnapshot` IPC resolved, so
+> `OrchestrationPane` handed that empty model to `TodoBoard` and the pane painted "No todos yet" for
+> the whole gap. That is a false empty state: a claim about the project made on the strength of a read
+> that has not answered. No store hook in the app exposed a loading phase, so no surface could have
+> rendered anything honest.
+>
+> **The system** (all under `crates/app/ui/src`). `store/loadable.ts` holds the closed phase model
+> `Loadable<T>` (`LoadStatus.Loading | Ready | Failed`) with `loading()` (one frozen constant),
+> `ready()` and `failed()`. `components/common/LoadableRegion.tsx` is the one component that renders a
+> phase: the loading branch puts the skeleton in a `role="status" aria-busy` wrapper carrying an
+> sr-only "Loading {label}" and reveals it only after `--skeleton-delay`; the ready branch renders
+> children bare so existing layouts are untouched; the failed branch shows the shared recovery notice
+> with a retry. `components/common/RecoveryNotice.tsx` was extracted out of
+> `components/PaneErrorBoundary.tsx`, which now routes to it (that boundary's test is unchanged and
+> green). `components/ui/skeleton.tsx` is the shadcn primitive, installed with `pnpm dlx shadcn@latest
+> add skeleton --yes` (radix-nova style, `animate-pulse rounded-md bg-muted`), never hand-written.
+> `components/common/SkeletonList.tsx` is an `aria-hidden` list of stand-in rows.
+> `components/orchestration/TodoBoardSkeleton.tsx` mirrors the board's toolbar strip and card rows
+> using the real `Card` frame, `TODO_SKELETON_ROWS` (6) rows with cycling title widths. `index.css`
+> gained the `--skeleton-delay: 150ms` token, the `--animate-skeleton-reveal` utility and its
+> `@keyframes skeleton-reveal`. Changing loading behaviour later means editing `LoadableRegion`, the
+> `index.css` token, or `loadable.ts`, never a call site. That one-place-to-change property is the
+> whole point of the system.
+>
+> **The pane.** `store/useOrchestration.ts` now returns
+> `{ snapshot: Loadable<OrchestrationReadModel>, error, refresh }`. A failure is bound to the project
+> it was read for, a successful model is committed inside `startTransition`, a failed re-read keeps
+> `ready` and sets `error`, and the next successful read clears it.
+> `components/orchestration/OrchestrationPane.tsx` has one `VIEW_LABEL` source used by both the
+> switcher and the region label, a `useDeferredValue(view)` so the switcher stays urgent while the
+> body settles, a `VIEW_SKELETON` registry (todos to `TodoBoardSkeleton`, each of the other five views
+> to a generic `SkeletonList` of `VIEW_SKELETON_ROWS`, 8, rows), and a timer count on the switcher
+> only while the snapshot is ready.
+>
+> **Decision: explicit `Loadable` rather than Suspense for data.** The app's hooks are
+> subscription-based (snapshot, then deltas), so Suspense would need a promise cache and would become
+> a second data paradigm beside the one every store hook already uses. React concurrency is used where
+> it pays instead: `startTransition` on the snapshot commit, `useDeferredValue` on the view switch.
+>
+> **DESIGN.md reversal.** R7.7 was narrowed to controls and a new **R7.7b, Region loading state**, was
+> added (skeleton mirroring the resting layout via `LoadableRegion`, delayed reveal, a11y, retry,
+> stale-while-revalidate, reduced motion). The §12 anti-pattern "Skeleton-screen placeholders" was
+> replaced by "A region that lies about its first read", and the motion table gained a
+> `--skeleton-delay` row. This reverses a documented anti-pattern, by the owner's explicit decision to
+> use shadcn's skeleton loader app-wide.
+>
+> **Evidence.** Built as three implementation waves with disjoint write sets plus one closing pass.
+> Wave 1 owned the shared parts (`store/loadable.ts`, `components/common/LoadableRegion.tsx` and its
+> test, `RecoveryNotice.tsx`, `PaneErrorBoundary.tsx`, `components/ui/skeleton.tsx`,
+> `SkeletonList.tsx`, `index.css`); wave 2 owned `store/useOrchestration.ts` with its test and
+> `TodoBoardSkeleton.tsx`; wave 3 owned `OrchestrationPane.tsx`, its new test, and `DESIGN.md`; the
+> closing pass added `src/test/heldRead.ts` and routed both suites' duplicated `holdRead` helper to it.
+> The pane's regression test, "shows the to-do stand-in, not an empty state, while the first snapshot
+> is in flight", was observed red against the old pane with
+> `expected <h2 data-slot="empty-title">…</h2> to be null`. In `useOrchestration.test.tsx` the four
+> existing tests were rewritten to read through the loadable and four phase tests were added, each new
+> one observed red by mutating the hook. `LoadableRegion.test.tsx` and `OrchestrationPane.test.tsx`
+> carry four tests each.
+>
+> Gates, run once from the repo root after the dedupe: `pnpm -C crates/app/ui typecheck`
+> (`tsc --noEmit`) clean; `pnpm -C crates/app/ui lint` (`eslint .`) clean; `pnpm -C crates/app/ui run
+> format:check` clean; `pnpm -C crates/app/ui test` **189 files / 1448 tests passed, 1 file / 1 test
+> failed**. That failure is `TodoBoard.test.tsx > "keeps the search box live and settles the filtered
+> list to the matching row, even over a large board"` timing out at the 20s `testTimeout` under
+> full-suite load; re-run on its own the file passes **1 file / 22 tests**, and it is not a file this
+> change set touches (last written in `c94397a`). `node scripts/check-theme-colors.mjs` clean;
+> `./scripts/check-file-size.sh` clean (non-gating, and no file from this change set appears in its
+> over-400-line report). The change set's own suites pass **4 files / 18 tests**
+> (`useOrchestration`, `OrchestrationPane`, `LoadableRegion`, `PaneErrorBoundary`). React Doctor
+> (`npx react-doctor@latest --verbose --scope changed`, 90 files) scored **82/100 with 42 warnings**;
+> the only finding inside a file this change set touched is `react-compiler-no-manual-memoization` at
+> `useOrchestration.ts:85`, `:90` and `:164`. The first two are the pre-existing `useCallback`s
+> carried over from HEAD, and `refresh` is a dependency of the subscribe effect, so its identity is
+> load-bearing. The rule fires 38 times across 14 files on this branch, so it is a codebase-wide
+> pattern rather than a regression introduced here; nothing was changed for it. The cargo gates were
+> not run because `git diff --stat` shows no Rust file in the change set.
+>
+> **Not verified.** There has been no live Tauri window pass: nobody has seen a skeleton render in
+> WebKitGTK, so the delay, the reveal, the card rhythm, and the recovery notice have had no
+> real-window judgment. The five non-todo orchestration views use the generic `SkeletonList` stand-in
+> rather than a mirrored one. The git hooks (`store/git/useGitStatus.ts`, `useGitFiles.ts`,
+> `useGitDiff.ts`, `useFilePreview.ts`, `usePullRequest.ts`, all via `useRepositoryRead.ts`) and
+> `store/cache/usePersistentSnapshot.ts` still hand-roll `loading` plus `value | null`, so the system
+> is app-wide by design and not yet by adoption. `e2e/src/screens/OrchestrationPane.ts` keeps its own
+> copy of the view labels (pre-existing).
+>
+> **Next session should start with:** run one bounded `just dev-alongside` visual pass on the
+> orchestration pane. Open a project with several todos, switch to To-dos, and confirm the card
+> skeleton appears only when the read takes longer than about 150ms and that a false "No todos yet"
+> never appears; switch views and confirm the switcher never lags; force a failed read to see the
+> recovery notice. Then migrate `useRepositoryRead`'s consumers and `usePersistentSnapshot` to
+> `Loadable` plus `LoadableRegion`, one hook per task, with a mirrored skeleton per surface. Then
+> commit this slice and update the `feat/todo-workspace-ux` PR.
+
+> **LATEST (2026-09-03): frontend perf essentials (React Compiler, hooks rules, error boundary,
+> deferred search) + DESIGN.md/PRODUCT.md rewritten as enforceable rules — `Done — pending verify`,
+> uncommitted, full UI gate green. Details under "Decisions / changes this session"; next UI work
+> must follow DESIGN.md §0's Definition of Done and pick up the §13 gaps (font stack first).**
+
+> **LATEST (2026-09-03): TODO WORK-ITEM SURFACES + TAG VISIBILITY — `Done — pending verify`,
+> uncommitted on `feat/todo-workspace-ux`.** This is a narrow presentation pass over tracker #75/#76
+> (parity G3–G5 remain Verified; no coordination behavior or read-model changed). Todo rows are now
+> full-width shared shadcn `Card` surfaces with a sibling `Button` for the row action and locked-agent
+> navigation, preserving the no-nested-control keyboard contract. Status, blocker, comment, and tag
+> metadata use the app's shared `Badge` variants and existing semantic tokens. Tags have a dedicated
+> wrapping rail on collapsed rows and remain visible in the expanded detail masthead; every tag has
+> a Lucide tag icon, and visible tag labels deliberately have no duplicate native title or tooltip.
+> The detail pane uses the shared `Tooltip` only for its icon-only Copy/More controls, while the row
+> uses it only for agent-terminal navigation. The visible full title and badges do not duplicate
+> themselves in tooltips. Done todos and satisfied blockers remain readable through muted semantic
+> text plus explicit icon/label state, without strike styling.
+>
+> **Frontend-wide readability correction.** An `rg` audit across `crates/app/ui` found three app-
+> chrome strike treatments: done todo titles, satisfied blocker titles, and deleted Git paths. All
+> three were removed. Deleted paths retain the existing `D` glyph, accessible `Deleted` label, and
+> semantic deletion tone. No user-authored Markdown `<del>`/`<s>` presentation was found, so there
+> was no content-semantic exception to preserve. The touched todo sources contain no raw palette
+> utilities, literal colors, ad-hoc alpha colors, or manual dark-mode overrides.
+>
+> **Evidence.** The shadcn correction used `pnpm dlx shadcn@latest info --json` and `pnpm dlx
+> shadcn@latest docs badge button tooltip card collapsible`; the returned official component docs
+> were read before the correction, and no component was installed or overwritten. Earlier tag/wrap
+> assertions were observed red against the prior implementation, including the tag-icon assertion.
+> The correction's first focused batch found one stale assertion about where blocker truncation is
+> applied (4 files green, one assertion red); after correcting the assertion, the identical command
+> `pnpm exec vitest run src/components/orchestration/TodoItem.test.tsx
+> src/components/orchestration/TagList.test.tsx src/components/orchestration/TodoDetail.test.tsx
+> src/components/git/ChangesTree.test.tsx src/lib/git.test.ts` passed **5 files / 69 tests**.
+> Two accessibility/layout assertions were then observed red before the locked-agent action gained
+> an independent action-oriented accessible name, a 45% width cap, and a truncating visible-label
+> span. A third assertion was observed red against the inset/scaling card trigger before its content
+> became flush, radius-free, focus-inset, and explicitly stable at scale 1 while active. The restored
+> `TodoItem.test.tsx` passed **1 file / 17 tests**. No second typecheck was run because this follow-up
+> changed JSX attributes and utility classes only. `pnpm typecheck` passed (`tsc --noEmit`) for the
+> immediately preceding correction. The Impeccable detector had already run exactly once and
+> returned clean before the later shadcn/strike correction; it was not repeated to preserve the
+> requested one-run ceiling. Full lint, full test, and e2e were intentionally not run.
+> **Visual-runtime gap:** this pass has not been viewed in a live Tauri window, so card density, tag
+> wrapping, focus/hover polish, and tooltip placement still need real-window judgment at the minimum
+> pane width and at a comfortable desktop width.
+>
+> **Next session should start with:** run one bounded `just dev-alongside` visual pass on todos with
+> mixed statuses, blockers, comments, locks, and several mixed-length tags. Confirm the row surfaces
+> wrap without horizontal overflow, expanded details show the same tag badges, completed text stays
+> readable, and only Copy/More and agent navigation expose tooltips. If that looks right, commit this
+> focused UI/test slice and update the existing `feat/todo-workspace-ux` PR.
+
+> **LATEST (2026-09-02): TODO WORKSPACE UX — todo pane redesign, agent ↔ todo navigation, and
+> per-run session-work context in agent terminal headers. `Done — pending verify`, uncommitted on
+> `feat/todo-workspace-ux` (branched from `fe648f7`, v0.17.0).** Tracker todos #74–#78 from
+> scratchpad `todo-workspace-ux`. Built as five agent tasks with exclusive file ownership per wave;
+> every new test was observed red against the unfixed behaviour before going green.
+>
+> **Core (#74).** `coordination::SessionActivity` records, per bound `ProcessId`, which todos and
+> scratchpads the process read (`Loaded`: `todo_get`, `todo_comment_list`, `scratchpad_read`, link
+> resolve) or wrote (`Worked`: every session-scoped mutation) through `ScopedFacade` — the one path
+> all agents reach core by, so MCP and IPC record identically and the local UI records nothing.
+> In-memory, capped at `MAX_SESSION_DOCUMENTS_PER_PROCESS = 64` per kind (oldest evicted), `Worked`
+> never downgraded, a repeat access publishes nothing. Cleared on process close through the existing
+> `CompositeLockReleaser` fan-out (same hook as todo locks and trust requests), so `composition.rs`
+> and `build_facade` are untouched. One lean query `Facade::session_work(process)` derives "current
+> work" (locks) from `Todos::list` and "this session" from the registry, dropping any recorded id
+> with no live document; one ids-only `DomainEvent::SessionWorkChanged { process }`. Two existing
+> tests that asserted "exactly one event" after a bound create/write now expect the activity event
+> alongside. Tauri `session_work` command (`facade.blocking`), TS mirror in `domain.ts`, `sessionWork`
+> in `api.ts`, `useSessionWork(process, enabled)` hook (subscribe-before-read, per-frame coalescing,
+> stale-response guard, no subscription while disabled — so pooled hidden panes cost nothing).
+>
+> **Todo pane (#75, #76).** `TodoFilters` + `SegmentedControl` rows replaced by one `TodoToolbar`
+> (shadcn input/select/toggle-group/button + the shared `TagFilterChips`): search, status, All / By
+> scratchpad, `"<shown> of <total>"` count, New todo; wraps within its own header. `BoardView`,
+> `TODO_STATUS_ICON`, `unmetBlockerLabel` live in `lib/todo.ts`. Rows show `#id`, icon + label status
+> (existing semantic tokens only, `data-status` emitted for later CSS), singular/plural unmet-blocker
+> count, scratchpad, tags, comment count; the lock owner is a sibling `Button` of the
+> `CollapsibleTrigger` (no nested interactive) that opens the agent's terminal via the existing
+> `selectProcess`. Stable `data-todo-*` handles replace span-order/badge-variant coupling in
+> `e2e/src/screens/TodoBoard.ts` (public API preserved; `coordination-panels.spec.ts` unchanged, 3/3).
+> **Owner-reported: tags were never visible anywhere** — `todo.tags`/`ScratchpadSummary.tags` reached
+> the webview but only fed the filter chips. New shared read-only `TagList` (`data-tags`/`data-tag`)
+> now renders each item's tags on todo rows and on scratchpad/diagram roster rows (`DocumentList`).
+>
+> **Terminal header (#77).** `SessionWorkBar` on `Agent` panes only, while visible: "Current work"
+> (locked todos) and "This session" (other touched todos + scratchpads), three inline per group, the
+> rest in one `DropdownMenu` overflow; tooltips carry full titles; groups clip rather than spill.
+> Activating an item calls `openOrchestrationItem` in `App.tsx` (reuses `openOrchestration`, sets an
+> `OrchestrationFocus` with a fresh nonce), the pane switches view, `TodoBoard` reveals (clears a
+> hiding filter, expands a collapsed group), expands and DOM-focuses the row; `ScratchpadPanel` opens
+> by name via the existing `editor.open` and focuses the roster row. Both focus effects retry until
+> the target row exists — the real-window walk caught that a freshly mounted pane ran them before its
+> first snapshot.
+>
+> **Evidence (#78).** `cargo test --workspace`: all crates green except the known pre-existing
+> `soloist-pty` red `create_terminal_runs_an_interactive_shell_in_the_project_dir` (tracker #34,
+> crate untouched); `soloist-core` 1297 passed incl. 15 new registry/query tests. `pnpm -C crates/app/ui
+> test`: 180 files / 1366 tests green. `just lint`: green (fmt, clippy -D warnings, tsc, ESLint,
+> Prettier, theme-color check, core-deps, core-cycles, file-size advisory unchanged, schema test).
+> `pnpm -C e2e typecheck`: clean. Real window: `specs/coordination/todo-workspace.spec.ts` **7/7 green**
+> (42 s) after the three defects it caught were fixed (SessionWorkBar overlap, inbound-focus timing,
+> TodoItem meta spilling under the agent control); the lead fixture arm now calls `todo_lock`,
+> `todo_get`, `scratchpad_read` over the real wire, so ids/status/blocker counts, the agent control
+> naming the lead's real process id, Current work / This session, exact return navigation with DOM
+> focus, no horizontal overflow of the board at the 720×480 minimum, and clear-on-stop are all
+> wire-driven. Clear-on-stop mutation-proven (dropping `session_activity` from the releaser fan-out
+> reddened exactly that test after the walk's own vacuous read was fixed). Full suite on the first
+> run: 19/20 spec files green with the new spec at 4/8 before the fixes; the fixed spec was re-run
+> alone. react-doctor: clean on every changed component; two pre-existing warnings on `App.tsx`
+> (complexity 21, >300 lines) unchanged by this branch. Impeccable's hook ran on every UI write.
+>
+> **Decisions.** Status colour stays within existing semantic tokens (DESIGN.md spends saturation on
+> process status only) — `data-status` makes colour a CSS-only change later. Reading a todo's
+> comments counts as loaded. Local-UI writes never record against an agent. Three inline items per
+> header group. Keyboard-Tab traversal is **not** e2e-asserted: the embedded WebDriver dispatches
+> synthetic key events that cannot move focus (recorded in `plan/e2e/e2e-01-screens-and-flows.md`);
+> the separate-tab-stop / no-nested-control guarantee is pinned by `TodoItem.test.tsx`.
+>
+> **Open threads / follow-ups.** (1) The open document's header (`DocumentTitle` via
+> `ScratchpadTitle`/`DiagramTitle`) still shows no tags — needs a `tags` prop threaded through both
+> editors. (2) Pre-existing, measured: at 720×480 with the git rail open the orchestration pane is
+> 184 px wide and its six-segment view switch needs 485 px; ~464 px with the rail closed, still
+> narrower than the switch. Unrelated to this feature; the e2e overflow assertion is scoped to the
+> board. (3) `App.tsx` complexity warnings pre-date this branch. (4) Nothing committed yet.
+>
+> **Next session should start with:** commit the working tree on `feat/todo-workspace-ux` (one
+> coherent change; the owner decides the stacked-PR split), open the PR against `main`, then run the
+> owner's visual pass in `just dev-alongside` (toolbar wrap at narrow pane widths, row tags, the
+> session-work bar with an agent that has locked/read documents, both navigation directions) before
+> moving #74–#78 to `Verified`. Then pick up follow-ups (1) and (2) above as their own small PRs.
+
+> **LATEST (2026-08-31): LOCAL-CLI INTER-AGENT COLLABORATION RESEARCH — comprehensive
+> replacement-oriented report complete; docs-only, no phase status changed.** The report is
+> [`docs/research/local-cli-inter-agent-collaboration.md`](docs/research/local-cli-inter-agent-collaboration.md)
+> (6,688 words, 64 unique primary-source links). It covers Claude Code, Codex, Gemini, Kimi, Amp,
+> OpenCode, GitHub Copilot CLI, and Generic tools against Soloist's exact constraints: users'
+> installed CLIs and existing setup/subscriptions, heterogeneous local teams, standardized
+> send/receive/acknowledge, and no provider credential brokerage.
+>
+> **Decision established by the evidence:** do not repair the current idle-gated PTY wake path.
+> `AgentMailbox::wake` ultimately reaches `PtyIo::write_all`; that is terminal input, not a provider
+> session protocol, and the current real-window tests use synthetic IPC-polling agents rather than
+> live Claude/Codex/Gemini/Kimi processes. Retain the bounded mailbox, authenticated scope, lineage,
+> list/get/ack, completion correlation, transcript, and timer scheduling; replace autonomous
+> message/timer/onboarding delivery with a durable collaboration broker plus capability-probed
+> provider Turn Adapters. ACP is a reusable southbound adapter where implemented, MCP remains the
+> agent-facing pull/ack plane, and A2A is a possible future external boundary but the wrong internal
+> layer for installed local CLIs. **No PTY fallback.**
+>
+> **Provider gates:** prototype Kimi ACP, Copilot SDK, and Codex app-server/exec first. Codex
+> app-server is rich but experimental; Kimi Web is optional/experimental behind ACP; Gemini/OpenCode/
+> Amp require installed-version conformance probes; Generic requires an explicit semantic transport
+> profile. Claude managed-team mode is **blocked** pending explicit Anthropic approval because the
+> technically suitable Agent SDK path conflicts with the subscription-reuse constraint under
+> Anthropic's published product policy; Channels fit the authenticated CLI better but remain a
+> no-receipt research preview. Google policy for this exact cached-subscription orchestration also
+> needs a recorded answer before Gemini GA. The active implementation work remains the bounded-file-
+> watching branch below; this research changed no source or phase status.
+
 > **LATEST (2026-08-28): BOUNDED PROJECT FILE WATCHING — twenty-two commits through `17f7fc5` on
 > `fix/bounded-project-file-watching`, PR #198, `Done — pending verify`. Measured on real hardware:
 > **57,596 watches / 8 inotify instances → 255 / 1** (~226x), dev build of this branch running
@@ -3831,6 +4166,108 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 
 ## Decisions / changes this session
 
+### Region loading system (2026-09-03) — `Done — pending verify`
+
+- **DESIGN.md reversal, by the owner's explicit decision** (the owner asked for shadcn's skeleton
+  loader app-wide). Skeleton stand-ins are now the region loading treatment: R7.7 was narrowed to
+  controls, new **R7.7b, Region loading state**, defines the treatment (a stand-in mirroring the
+  region's resting layout through `LoadableRegion`, revealed only after `--skeleton-delay`, with the
+  a11y wrapper, the retry, stale-while-revalidate on re-read, and the reduced-motion behaviour), the
+  §12 anti-pattern "Skeleton-screen placeholders" was replaced by "A region that lies about its first
+  read", and the motion table gained a `--skeleton-delay` row.
+- **Explicit `Loadable` over Suspense for data.** Every read-model hook returns the closed
+  `Loadable<T>` phase and `LoadableRegion` is the one component that renders it. Suspense for data
+  was rejected because the app's hooks are subscription-based (snapshot, then deltas): it would need
+  a promise cache and would become a second data paradigm beside the one every store hook already
+  uses. React concurrency is used where it pays instead, `startTransition` on the snapshot commit and
+  `useDeferredValue` on the view switch.
+- **Rendered Markdown is the leaf case of the same rule.** `MarkdownView` defers its editor by one
+  pass (`useDeferredValue` with an initial value) so a click paints without it, and stands in for
+  itself with prose lines through the shared `LoadingStandIn` until the editor reports its content
+  seeded. A comment body under an author line waits silently (`announce={false}`); a body that is the
+  whole of a region names its wait.
+
+### Frontend performance essentials + design-standard rewrite (2026-09-03) — `Done — pending verify`
+
+Uncommitted on `feat/todo-workspace-ux`, alongside the todo-workspace work below. Research first
+(`.scratch/research/frontend-perf-essentials.md`, verified against the installed packages, not
+articles), then six parallel implementers with disjoint write sets, then one full gate.
+
+- **React Compiler wired** (`babel-plugin-react-compiler` via `@vitejs/plugin-react` 6's
+  `reactCompilerPreset` + `@rolldown/plugin-babel`, build-time only). Verified compiled output in
+  production chunks (`.c)(n)` cache call sites: 112 in the entry chunk). Controlled A/B on the same
+  tree: entry chunk **142,014 → 158,117 bytes gzip (+16 KB)** with the compiler on; no render-time
+  measurement exists yet, so the win is unmeasured and the cost is recorded.
+- **`eslint-plugin-react-hooks` 7.1 recommended config enabled** (17 compiler-aware rules; the
+  config previously hand-listed two). The 28 violations it exposed (16 `set-state-in-effect`,
+  11 `refs`, 1 `immutability`, 22 files) were fixed by restructuring, with two justified
+  `eslint-disable-next-line` opt-outs (AppearanceProvider's mutation-queue ref; TodoBoard's
+  navigation effect). New tests: `useLoadOnce`, `useMermaidTheme`, `TimersPanel`,
+  `ThemeColorInput`; extended `useTerminalPool`, `useTemplates`.
+- **Compiler incompatibility found and fixed:** `@headless-tree` mutates behind stable identities,
+  so the git trees stopped updating under the compiler (16 tests red). Fix per the library's own
+  guide: `useTree` from `@headless-tree/react/react-compiler` in `RepositoryTree.tsx` plus
+  `"use no memo"` on `Tree`/`TreeItem`/`TreeItemChevron` in `ui/tree.tsx`; each half proven
+  load-bearing by reverting it alone.
+- **Pane-level error boundary** (`components/PaneErrorBoundary.tsx`, ~50-line class, reuses the
+  shadcn destructive `Alert`, "Try again" resets) around every lazy `Suspense` in `App.tsx`,
+  `DeferredOverlay`, `TitlebarActions`, `LazyRichTextEditor`. Before this a render error in any
+  pane blanked the whole webview.
+- **`useDeferredValue`** on the two typed-search derivations (`TodoBoard` filter, `DocumentRoster`
+  query); inputs stay live, derived lists/empty-state copy lag together. 3000-row tests added.
+- **Regression caught and fixed:** the components lint pass dropped
+  `navigatedNonces.set(project, focusNonce)` from TodoBoard's navigation effect; restored (test
+  "opens on the list when an activation it already acted on is still standing at mount" was the
+  catch). TodoBoard tests also gained the missing `TooltipProvider` wrap the in-flight todo work
+  needed.
+- **Not done, deliberately:** list virtualization (no measured jank; the todo board is a dnd-kit
+  sortable, so virtualizing it is a real change that needs evidence first); `react-doctor` ESLint
+  plugin (package name unverified).
+- **Gate (UI):** `pnpm lint` 0, `pnpm typecheck` 0, `pnpm format:check` clean, `pnpm test`
+  **188 files / 1437 tests green**, `pnpm build` green with the compiler on.
+- **DESIGN.md rewritten into 105 numbered rules** (`R0`–`R13`) with a 10-item Definition of Done,
+  a banned-pattern list and a §13 "known gaps" list; the frozen palette snapshot (lines 1–110) is
+  byte-identical. **PRODUCT.md** re-anchored to the locked direction (outlined controls + hairline
+  structure, in-app glass over the app's own content only, restrained native motion, WCAG 2.2 AA)
+  with the generic-AI-UI anti-references named. Research inputs and the lead's corrections live in
+  `.scratch/research/design/`. Verified facts recorded there: patched Ubuntu 22.04 ships
+  WebKitGTK 2.50.4 and 24.04 ships 2.52.6 (Launchpad); a feature probe on 2.52.6 supports
+  `@starting-style`, `linear()`, `allow-discrete`, scroll-driven animations, View Transitions,
+  `prefers-reduced-transparency`; `overlay` is unsupported.
+- **Open (tickets from DESIGN.md §13):** the sans font stack in `index.css` names only Apple faces
+  and Arial, so Ubuntu renders Liberation Sans (fix to a `system-ui`/Adwaita Sans/Ubuntu Sans
+  stack); no `LucideProvider`/`absoluteStrokeWidth` (icon stroke varies 1.0–2.0 px); no `aria-live`
+  for process/agent status; sidebar collapse not implemented; `card.tsx` radius/ring/footer tint;
+  `.impeccable/design.json` sidecar stale — run `/impeccable document` deliberately; vendored
+  `components/ui` audit incomplete (7 of ~36 checked).
+
+### Local CLI inter-agent collaboration research — replace PTY injection (2026-08-31, docs-only)
+
+- Produced [`docs/research/local-cli-inter-agent-collaboration.md`](docs/research/local-cli-inter-agent-collaboration.md):
+  525 lines / 6,688 words / 64 unique primary-source links. Research ran through delegated agents
+  against official provider docs, official repositories/source/issues, ACP/MCP/A2A specifications,
+  plus a separate adversarial source pass and a read-only audit of the current Soloist path.
+- Diagnosed the exact current failure: O13/O15 and timer wake delivery use heuristic idle state, then
+  `Supervisor::try_submit_turn`, then the PTY input channel and real `write_all`. The UI labels the
+  resulting `WakeSubmitted` as "Delivered," even though only a local terminal-input channel accepted
+  bytes. The E2E fixtures directly poll IPC and acknowledge messages; they do not establish delivery
+  into a real provider conversation.
+- Recommended a two-plane replacement: a durable C6 Collaboration Broker owns teams, stable
+  participants, messages, delivery evidence, retries, acknowledgements and audit; a C4-owned
+  `AgentTurnDriver` registry maps normalized session/turn operations onto each provider's supported
+  semantic control surface. Interactive PTY agents and managed team agents become distinct modes.
+- Provider conclusions: Codex app-server with `exec --json`/resume fallback; Kimi ACP with optional
+  experimental Web; Gemini ACP with live defect/policy gates; Amp streaming JSON; OpenCode local
+  server/SDK with ACP fallback; GA Copilot SDK with ACP fallback; Generic only through a declared
+  conformance-tested protocol. Claude's Agent SDK is technically suitable but subscription-backed
+  product use is blocked pending Anthropic approval; Channels are preview-only and carry no receipt.
+- Protocol conclusions: ACP is client-to-agent control, MCP is the model-facing coordination pull/ack
+  surface, and A2A is technically possible but does not remove the provider last-mile adapters and
+  adds the wrong network/discovery/task-server layer for this local product.
+- No code/tests were run or changed. Verification was report self-review, Markdown structure review,
+  citation count, and the independent contradiction pass. Existing user/untracked changes were left
+  untouched.
+
 ### Bounded file watching — the review-fix pass (2026-08-28) — `Done — pending verify`
 
 A two-axis code review (Standards + Spec, parallel sub-agents) ran against
@@ -6716,6 +7153,13 @@ review's one should-fix + the mechanical nits:
 
 ## Open threads / unresolved
 
+- **Managed-agent delivery replacement (2026-08-31):** owner review/scheduling is required before
+  implementation. The report recommends prototypes and live conformance gates before architecture
+  commits; do not extend the PTY wake path meanwhile.
+- **Provider policy gates:** obtain explicit Anthropic approval for subscription-backed Claude managed
+  sessions and a recorded Google answer for the exact cached-subscription Gemini ACP use. Technical
+  success is not product authorization.
+
 - **Phase-5 runtime echo/control gate — CLOSED by a real human click (2026-06-19), R2 unblocked.** The user
   ran `just dev` (host `DISPLAY=:0`), selected the `shell` process in the sidebar, clicked its **per-row Start**,
   typed `echo hi` → it **started and echoed**. So the control wiring, the core start path, and the one untested
@@ -6982,6 +7426,14 @@ has a `GripVertical` icon. Both reviewers flagged it as "fine if deliberate"; le
   Rust and no supervisor/PTY behaviour.
 
 ## Next session should start with
+
+**◆ LOCAL-CLI COLLABORATION RESEARCH (2026-08-31, docs-only):** review
+[`docs/research/local-cli-inter-agent-collaboration.md`](docs/research/local-cli-inter-agent-collaboration.md)
+and decide whether to schedule the recommended replacement track. If approved, begin only with the
+Wave-0 policy questions and black-box prototypes for Kimi ACP, Copilot SDK, and Codex app-server/exec;
+do not modify C6/O13/O15/O16 until those prototypes establish the normalized adapter contract. The
+existing bounded-file-watching branch remains the active implementation work and keeps its next steps
+below.
 
 **◆ NEWEST (2026-08-28) — shadcn adoption pass + working-agent shimmer, branch
 `feat/shadcn-adoption-and-working-shimmer`, stacked on PR #196's branch.**
@@ -7556,3 +8008,95 @@ not committed).
    status flip doesn't re-create the xterm (re-attach/replay — correct but mildly janky).
 5. **Do not pull deferred `later` rows into v1** (A5/A8/A10/A12/A13, B9, C8 webgl). The live `notify` watcher
    is now **Phase 6 work** (item 2), no longer "deferred".
+
+---
+
+## Session — todo workspace UI rebuild (branch `feat/todo-workspace-ux`)
+
+**State: in progress, not Verified.** Tree is green (`tsc` 0, vitest 183 files / 1411 tests, eslint, prettier)
+and the branch is coherent, but two visual defects are known-open and one verification pass is unfinished.
+
+**Landed.** The todo board's inline collapsible is replaced by master–detail panel navigation: a full-width
+card row navigates to a detail panel via a horizontal `transition-transform` track (`TodoPanels`, and a
+reusable `common/SlidingPanels`), with a back button and focus hand-off in both directions. Todo statuses are
+coloured through `TODO_STATUS_TONE` — tone on the chip tint and glyph, label always in ink, because the
+built-in light theme declares `extensions.soloist` and so bypasses `ensureThemeContrast` (attention `#e19100`
+measures 2.48:1). Comment bodies render through `MarkdownView`. Detail actions moved into a three-band header
+(chrome / title / meta rail) that sheds labels by container query and folds Edit + Copy into a `⋯` menu at
+narrow widths. Blockers lead the panel. Scratchpad provenance moved off the row into the detail. Spacing is a
+geometric ladder — 4px inside a card, 8px between cards, 16px between groups. Toolbar search adopts shadcn
+`input-group`. `DetailSection`/`DETAIL_WELL` were replaced by `common/Section` + `Well`.
+
+**Bugs found and fixed, each reproduced before the fix.**
+- Detail panel rendered offset with its Back button clipped outside the pane on every open: focus moved to
+  Back mid-transition and the browser's scroll-into-view scrolled the viewport, which `overflow-hidden` does
+  not prevent. Fixed with `focus({ preventScroll: true })` plus `overflow-clip` (measured in WebKitGTK:
+  under `hidden` a `scrollIntoView` moved the box 190px; under `clip`, 0).
+- The retained detail panel was never unmounted: the `transitionend` guard matched `propertyName === "transform"`
+  while Tailwind v4 compiles `-translate-x-full` to `translate`. Guard now accepts both. Caught by e2e, red
+  against the real code; jsdom fires no transitions and could not have seen it.
+- Opening the To-dos tab restored a stale detail route, because `orchestrationFocus` is a one-shot command
+  modelled as persistent state and `TodoBoard` is conditionally rendered.
+
+**Window minimum raised 720 → 960** (`crates/app/tauri.conf.json`). `GitRail` is `shrink-0` up to 560px and
+unclamped, so at the old floor the orchestration pane was 464px with the rail closed, 184px at its default
+and 0 at its maximum. `e2e/src/harness/window.ts` parses the config rather than restating it, so the harness
+followed automatically. `DESIGN.md:685` updated; earlier `PROGRESS.md` entries mentioning 720 are historical
+and left as written.
+
+**Second pass — the open items above, closed.**
+- **Card border.** Was invisible in dark and weak in light. Now `border-foreground/45 dark:border-foreground/32`
+  (hover `/60` / `/45`), measured **3.05:1 light and 3.10:1 dark** composited over the card fill. A border
+  *token* could not have worked: `--border` is 1.44:1 dark and 1.31:1 in light, so it reads in neither theme —
+  a transparency of the ink moves away from the pane in whichever direction the theme runs. Recorded cost: at
+  `/45` the card outline carries about the weight of the status-chip outlines beside it, so hierarchy is now
+  text > chips ≈ card edge rather than text > chips > card edge. `/35` (~2.5:1) is where to go if that
+  hierarchy is later judged more important than clearing 3:1. Hover previously moved only the fill, at
+  1.13:1 dark / 1.05:1 light — imperceptible; it now moves a real 1.5:1 in both themes.
+- **Header/body alignment.** The pinned header was full-bleed against a centred `max-w-3xl` body — 308px of
+  disagreement, now 0. A second bug was hiding inside it: the title ran the full pane at 1332px and now sits
+  at 736px, matching the prose beneath. Both sides share one exported `DETAIL_MEASURE`, so they can only agree.
+- **Suspense flash.** `LazyRichTextEditor` takes an optional `fallback` defaulting to today's bordered box;
+  `CommentList` passes `null`. Comments lose ~240ms of empty boxes and a 57px jump; every other caller keeps
+  its frame through the default.
+- **Editor exit.** `Done` moved into the pinned header. `useAutosave` already flushes on unmount, so this is
+  one button, not a cross-boundary state lift; `data-todo-autosave-status` deliberately stayed put.
+- **`statusAttention` `#e19100` → `#b47400`** in `soloist-default`'s light override, taking the glyph from
+  2.16:1 to 3.19:1 on the chip's tinted plate. The *real* bug was the guard: `contrast.test.ts` filtered out
+  every theme carrying an explicit `extensions` block, so a hand-written hex was never checked by anything.
+  The filter is gone, the clamp's background list is exported as `markBackgrounds()` and shared with the test
+  instead of being rebuilt inline, and the guard now reddens on that exact hex.
+
+**Known open — next session should start here.**
+1. **Selection washes sit outside the theme system.** `--sidebar-sel-fill-unemphasized` is a runtime
+   `color-mix` in `index.css`, not a member of `ThemeColors`, so `markBackgrounds()` structurally cannot
+   reference it. Status tones on a selected-but-unfocused sidebar row measure 2.51–2.75:1 and no clamp can
+   see that ground. Either promote the selection washes into `ThemeColors`, or decide translucent washes are
+   out of scope. Not a hex; an architecture call.
+2. Row **tags** and the **locked-by control** have still never been seen rendered — both are MCP-only with no
+   Tauri command, confirmed `rowsWithTags: 0` / `rowsWithLock: 0` across six live rows.
+3. **The panel-position bug is uncovered by e2e, deliberately.** `getBoundingClientRect()` forces a layout
+   flush and cannot observe compositing staleness, so a rect assertion would certify the bug rather than
+   catch it, and the harness has no visual-regression capability. Adding one is real infrastructure and a
+   charter decision. (The mutation pass itself *is* complete: three mutations each reddened only their own
+   assertion, and both coordination specs are **12/12 green** against the tree after the 960px floor, the
+   chevron removal, the `InputGroup` toolbar and the three-band header all landed.)
+4. **Rail-at-max (144px) has no spec.** It is a different guarantee from "the app's minimum window" — the
+   narrowest a user can *drag* the pane, not the smallest window allowed — and needs a rail-drag arrange step.
+   `todo-detail` measured a real header overflow floor at a 140px pane, so 144px sits four pixels above it,
+   which is the kind of margin that stops being true after one restyle. Worth a catalog row.
+5. Fixture todos **#81–83** are in the user's real Soloist project and need deleting (MCP-only).
+6. Deferred, both real: clearing `orchestrationFocus` upstream in `App.tsx` (also cures `ScratchpadPanel`
+   re-opening its last-navigated scratchpad), and the `type-*` ramp restated as raw rem literals in ~147
+   further call sites across 80 files.
+
+**Measuring colour in this app — read before trusting a number.** Computed values resolve to `oklab()`, so a
+regex over `getComputedStyle` reads L/a/b as r/g/b and returns confident nonsense. Rasterise through a 1×1
+canvas instead. That is only half of it: `background-clip: border-box` means a translucent border composites
+over the element's **own fill**, not the surface behind it. Four measurement failures this session shared one shape: **a check that can
+pass vacuously will, and it will look like good news.** An `oklab` value parsed as RGB said a fix had
+regressed; a Python port using `or` where TypeScript uses `??` made an empty `{}` fall through; probing a
+Tailwind class that the JIT never emitted returned the default; and a git pathspec run from the wrong
+directory matched nothing and printed an empty diff, which read as "no changes found". Each produced a
+confident answer that argued for doing nothing. Cross-check a suspicious figure against arithmetic before
+acting on it — that is what caught all four.

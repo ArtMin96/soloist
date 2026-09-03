@@ -24,12 +24,6 @@ describe("the change display map", () => {
     }
   });
 
-  it("draws only a path that no longer exists as gone", () => {
-    const gone = EVERY_KIND.filter((kind) => CHANGE[kind].gone);
-
-    expect(gone).toEqual(["deleted"]);
-  });
-
   it("tells a conflict apart from a deletion, the two states a red row could mean", () => {
     expect(CHANGE.conflicted.toneClass).not.toBe(CHANGE.deleted.toneClass);
   });

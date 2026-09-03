@@ -51,6 +51,7 @@ import type {
   PullRequestSurface,
   RenderedPrompt,
   ScratchpadView,
+  SessionWork,
   Sidebar,
   TemplateDefaults,
   TemplateKind,
@@ -95,6 +96,12 @@ export function lineageEdges(): Promise<LineageEdge[]> {
 // true state instead of an edge-triggered stale badge.
 export function agentActivity(): Promise<AgentSignal[]> {
   return invoke<AgentSignal[]>("agent_activity");
+}
+
+// The coordination documents an agent holds now or touched this run — the terminal header's
+// context. Null when the process is not in the registry.
+export function sessionWork(process: number): Promise<SessionWork | null> {
+  return invoke<SessionWork | null>("session_work", { process });
 }
 
 // A project's working-tree status — what is checked out, how it stands against its upstream, and

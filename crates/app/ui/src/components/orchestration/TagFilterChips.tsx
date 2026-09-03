@@ -27,7 +27,7 @@ export function TagFilterChips({ tags, active, onToggle }: TagFilterChipsProps) 
             pressed={isActive}
             onPressedChange={(pressed) => onToggle(pressed ? tag : null)}
             className={cn(
-              "h-auto min-w-0 rounded-md px-1.5 py-0.5 text-[0.6875rem] font-normal transition-colors duration-[var(--dur-fast)] ease-out-quint",
+              "type-label h-5 min-w-0 rounded-full px-2 font-medium transition-colors duration-[var(--dur-fast)] ease-out-quint",
               "focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-none",
               // Stacked rather than a single `data-[state=on]:` variant: the base `Toggle` primitive
               // carries its own unconditional `hover:bg-muted` and `aria-pressed:bg-muted`, each at the

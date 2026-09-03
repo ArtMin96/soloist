@@ -13,9 +13,11 @@ import {
   SettingsOverlay,
   TerminalPane,
 } from "@/components/deferredAppComponents";
+import type { OrchestrationFocus } from "@/components/orchestration/orchestrationFocus";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { NotificationToasts } from "@/components/NotificationToasts";
 import { OrphanDialog } from "@/components/OrphanDialog";
+import { PaneErrorBoundary } from "@/components/PaneErrorBoundary";
 import { RemoveProcessDialog } from "@/components/RemoveProcessDialog";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { StartSurface } from "@/components/StartSurface";
@@ -79,6 +81,7 @@ export default function App() {
   const agents = useAgents(store.reportError);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [orchestrationProjectId, setOrchestrationProjectId] = useState<number | null>(null);
+  const [orchestrationFocus, setOrchestrationFocus] = useState<OrchestrationFocus | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTabId | null>(null);
@@ -90,6 +93,7 @@ export default function App() {
   const clearAlternativeView = useCallback(() => {
     setSelectedProjectId(null);
     setOrchestrationProjectId(null);
+    setOrchestrationFocus(null);
   }, []);
 
   // Settings, on the tab a caller named where it had a reason to name one — the assist setting is
@@ -159,6 +163,20 @@ export default function App() {
       setSelectedProjectId(null);
     },
     [deselectProcess],
+  );
+
+  // The session-work bar's opener: reuses `openOrchestration` for the pane switch, then names the
+  // exact item to focus with a fresh nonce, so activating the same item twice in a row still
+  // refocuses it rather than being a no-op.
+  const openOrchestrationItem = useCallback(
+    (
+      projectId: number,
+      focus: { view: "todos"; id: number } | { view: "scratchpads"; name: string },
+    ) => {
+      openOrchestration(projectId);
+      setOrchestrationFocus({ ...focus, nonce: Date.now() });
+    },
+    [openOrchestration],
   );
 
   const stopProcess = useCallback(
@@ -321,58 +339,75 @@ export default function App() {
                           region: nothing here remounts the terminal when the split appears. */}
                         <main className="relative flex min-w-0 flex-1 flex-col bg-surface">
                           <div className="relative min-h-0 flex-1">
-                            <Suspense fallback={<div className="h-full w-full bg-background" />}>
-                              {/* Keep-alive pool: every recently-viewed process keeps its terminal mounted
+                            <PaneErrorBoundary label="Workspace">
+                              <Suspense fallback={<div className="h-full w-full bg-background" />}>
+                                {/* Keep-alive pool: every recently-viewed process keeps its terminal mounted
                           (xterm + live stream) so switching back is instant; only the selected one
                           is visible, the rest sit hidden with both their renderer and their byte
                           parsing paused, so a hidden pane costs no per-frame main-thread work. */}
-                              {poolProcesses.map((process) => (
-                                <TerminalPane
-                                  key={process.id}
-                                  process={process}
-                                  visible={process.id === selectedId}
-                                  processes={store.processes}
-                                  onSelectProcess={selectProcess}
-                                  handlers={handlers}
-                                />
-                              ))}
-                              {!selected &&
-                                (selectedProject ? (
-                                  <ProjectSettingsPane
-                                    key={selectedProject.id}
-                                    project={selectedProject}
-                                  />
-                                ) : orchestrationProject ? (
-                                  <OrchestrationPane
-                                    key={orchestrationProject.id}
-                                    project={orchestrationProject}
-                                  />
-                                ) : (
-                                  <StartSurface
-                                    hasProjects={projects.projects.length > 0}
-                                    onOpenProject={projects.open}
-                                    onLaunchAgent={openPicker}
-                                    notice={projects.notice}
+                                {poolProcesses.map((process) => (
+                                  <TerminalPane
+                                    key={process.id}
+                                    process={process}
+                                    visible={process.id === selectedId}
+                                    processes={store.processes}
+                                    onSelectProcess={selectProcess}
+                                    handlers={handlers}
+                                    onOpenTodo={(id) =>
+                                      openOrchestrationItem(process.project, { view: "todos", id })
+                                    }
+                                    onOpenScratchpad={(name) =>
+                                      openOrchestrationItem(process.project, {
+                                        view: "scratchpads",
+                                        name,
+                                      })
+                                    }
                                   />
                                 ))}
-                            </Suspense>
+                                {!selected &&
+                                  (selectedProject ? (
+                                    <ProjectSettingsPane
+                                      key={selectedProject.id}
+                                      project={selectedProject}
+                                    />
+                                  ) : orchestrationProject ? (
+                                    <OrchestrationPane
+                                      key={orchestrationProject.id}
+                                      project={orchestrationProject}
+                                      focus={orchestrationFocus}
+                                      onOpenAgent={selectProcess}
+                                    />
+                                  ) : (
+                                    <StartSurface
+                                      hasProjects={projects.projects.length > 0}
+                                      onOpenProject={projects.open}
+                                      onLaunchAgent={openPicker}
+                                      notice={projects.notice}
+                                    />
+                                  ))}
+                              </Suspense>
+                            </PaneErrorBoundary>
                           </div>
                           {activeProjectId !== null && splitView !== null && (
-                            <Suspense fallback={null}>
-                              {splitView.kind === PULL_REQUEST ? (
-                                <PullRequestPane
-                                  project={activeProjectId}
-                                  agent={handoffTarget(selected, activeProjectId)}
-                                  onClose={closeSplit}
-                                />
-                              ) : (
-                                <DiffPane
-                                  project={activeProjectId}
-                                  selection={splitView}
-                                  onClose={closeSplit}
-                                />
-                              )}
-                            </Suspense>
+                            <PaneErrorBoundary
+                              label={splitView.kind === PULL_REQUEST ? "Pull request" : "Diff view"}
+                            >
+                              <Suspense fallback={null}>
+                                {splitView.kind === PULL_REQUEST ? (
+                                  <PullRequestPane
+                                    project={activeProjectId}
+                                    agent={handoffTarget(selected, activeProjectId)}
+                                    onClose={closeSplit}
+                                  />
+                                ) : (
+                                  <DiffPane
+                                    project={activeProjectId}
+                                    selection={splitView}
+                                    onClose={closeSplit}
+                                  />
+                                )}
+                              </Suspense>
+                            </PaneErrorBoundary>
                           )}
                         </main>
                         {/* The version-control rail sits beside the main area rather than
@@ -380,14 +415,16 @@ export default function App() {
                           keeps working. A sibling of <main> rather than a wrapper around it:
                           nothing here remounts the terminal pane when the rail's chunk lands. */}
                         {activeProjectId !== null && (
-                          <Suspense fallback={null}>
-                            <GitRail
-                              key={activeProjectId}
-                              project={activeProjectId}
-                              onOpen={openSplit}
-                              onOpenPullRequest={() => openSplit({ kind: PULL_REQUEST })}
-                            />
-                          </Suspense>
+                          <PaneErrorBoundary label="Git panel">
+                            <Suspense fallback={null}>
+                              <GitRail
+                                key={activeProjectId}
+                                project={activeProjectId}
+                                onOpen={openSplit}
+                                onOpenPullRequest={() => openSplit({ kind: PULL_REQUEST })}
+                              />
+                            </Suspense>
+                          </PaneErrorBoundary>
                         )}
                       </div>
                       <NotificationToasts
@@ -423,7 +460,7 @@ export default function App() {
                         onConfirm={confirmProcessRemoval}
                         onDismiss={removal.dismiss}
                       />
-                      <DeferredOverlay open={pickerOpen}>
+                      <DeferredOverlay open={pickerOpen} label="Launch picker">
                         <LaunchPicker
                           open={pickerOpen}
                           onOpenChange={setPickerOpen}
@@ -433,7 +470,7 @@ export default function App() {
                           onCreateTerminal={onCreateTerminal}
                         />
                       </DeferredOverlay>
-                      <DeferredOverlay open={settingsOpen}>
+                      <DeferredOverlay open={settingsOpen} label="Settings">
                         <SettingsOverlay
                           open={settingsOpen}
                           onOpenChange={settingsOpenChanged}
@@ -441,7 +478,7 @@ export default function App() {
                           tab={settingsTab}
                         />
                       </DeferredOverlay>
-                      <DeferredOverlay open={quickJumpOpen}>
+                      <DeferredOverlay open={quickJumpOpen} label="Quick jump">
                         <QuickJumpPalette
                           open={quickJumpOpen}
                           onOpenChange={setQuickJumpOpen}
@@ -451,7 +488,7 @@ export default function App() {
                           onSelectProject={openProjectSettings}
                         />
                       </DeferredOverlay>
-                      <DeferredOverlay open={quickActionsOpen}>
+                      <DeferredOverlay open={quickActionsOpen} label="Quick actions">
                         <QuickActionsPalette
                           open={quickActionsOpen}
                           onOpenChange={setQuickActionsOpen}
@@ -466,7 +503,7 @@ export default function App() {
                           onRemove={requestProcessRemoval}
                         />
                       </DeferredOverlay>
-                      <DeferredOverlay open={commandPaletteOpen}>
+                      <DeferredOverlay open={commandPaletteOpen} label="Command palette">
                         <CommandPalette
                           open={commandPaletteOpen}
                           onOpenChange={setCommandPaletteOpen}

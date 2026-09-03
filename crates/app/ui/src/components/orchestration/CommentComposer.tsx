@@ -1,9 +1,7 @@
 import { useState, type KeyboardEvent } from "react";
 import { SendHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { GLASS_CONTROL_SURFACE } from "@/components/ui/glass";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
 
 interface CommentComposerProps {
   /** Posts the comment body; resolves on success (the draft clears), rejects to keep the draft. */
@@ -15,6 +13,8 @@ interface CommentComposerProps {
 // comments are short plain notes, and Enter-to-send is incompatible with a rich editor's Enter — so
 // it reaches for the shared editor module by *not* forking it. It owns only its draft and in-flight
 // state; the post routes through the board's store, which surfaces any failure and keeps the draft.
+//
+// Frameless: it is mounted at the foot of the comment thread's own well, which draws the border.
 export function CommentComposer({ onSubmit }: CommentComposerProps) {
   const [value, setValue] = useState("");
   const [posting, setPosting] = useState(false);
@@ -40,7 +40,9 @@ export function CommentComposer({ onSubmit }: CommentComposerProps) {
   };
 
   return (
-    <div className={cn("flex items-end gap-1 rounded-lg border p-1", GLASS_CONTROL_SURFACE)}>
+    <div className="flex items-end gap-1 p-1">
+      {/* Frameless at rest, but the primitive's focus ring is kept: with the border gone it is the
+          only thing that marks the field, and the thread's well leaves room for it to draw. */}
       <Textarea
         value={value}
         onChange={(event) => setValue(event.target.value)}
@@ -48,7 +50,7 @@ export function CommentComposer({ onSubmit }: CommentComposerProps) {
         placeholder="Add a comment…"
         aria-label="Add a comment"
         rows={1}
-        className="min-h-8 flex-1 border-0 bg-transparent text-[0.8125rem] shadow-none focus-visible:ring-0 supports-backdrop-filter:bg-transparent"
+        className="type-body min-h-8 flex-1 border-0 bg-transparent shadow-none"
       />
       <Button
         size="icon-sm"

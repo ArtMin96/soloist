@@ -40,20 +40,30 @@ export function DiffViewer({
 }) {
   const language = useMemo(() => languageOf(diff.path), [diff.path]);
   const appliedTheme = useMemo(() => theme ?? defaultAppliedTheme(dark), [theme, dark]);
-  const [highlight, setHighlight] = useState(false);
+  // What `ensureHighlighting` last resolved, so `highlight` below reads false again the instant
+  // `language`/`appliedTheme` move past it — a grammar is fetched, so the diff paints plain first
+  // and gains its colour a moment later rather than waiting on a module before showing anything.
+  const [loaded, setLoaded] = useState<{
+    language: string | null;
+    theme: AppliedTheme;
+    ready: boolean;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    setHighlight(false);
-    // A grammar is fetched, so the diff paints plain first and gains its colour a moment later
-    // rather than waiting on a module before showing anything at all.
     void ensureHighlighting(language, appliedTheme).then((ready) => {
-      if (!cancelled) setHighlight(ready);
+      if (!cancelled) setLoaded({ language, theme: appliedTheme, ready });
     });
     return () => {
       cancelled = true;
     };
   }, [appliedTheme, language]);
+
+  const highlight =
+    loaded !== null &&
+    loaded.language === language &&
+    loaded.theme === appliedTheme &&
+    loaded.ready;
 
   const attached = useMemo(() => (actions ? attach(diff.hunks) : undefined), [actions, diff.hunks]);
 

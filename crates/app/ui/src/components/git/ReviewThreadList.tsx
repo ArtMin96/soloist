@@ -124,7 +124,11 @@ function ThreadRow({
           {thread.comments.map((comment) => (
             <div key={comment.url ?? thread.id} className="flex flex-col gap-1">
               <p className="type-label text-muted-foreground">{comment.author}</p>
-              <MarkdownView markdown={comment.body} ariaLabel={`${comment.author}'s comment`} />
+              <MarkdownView
+                markdown={comment.body}
+                ariaLabel={`${comment.author}'s comment`}
+                announce={false}
+              />
             </div>
           ))}
         </div>

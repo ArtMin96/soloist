@@ -108,11 +108,12 @@ describe("ChangesTree", () => {
     await waitFor(() => expect(document.activeElement).toBe(row("a.rs")));
   });
 
-  it("draws a deleted file as gone, and the folder holding it as still there", () => {
+  it("keeps a deleted file name readable while its status names the deletion", () => {
     render(<Changed changes={[change("src/gone.rs", "deleted")]} />);
 
-    expect(within(row("gone.rs")).getByText("gone.rs").className).toContain("line-through");
-    expect(within(row("src")).getByText("src").className).not.toContain("line-through");
+    const deleted = row("gone.rs");
+    expect(within(deleted).getByText("gone.rs").className).not.toContain("line-through");
+    expect(within(deleted).getByRole("img").getAttribute("aria-label")).toBe("Deleted");
   });
 
   it("offers discard only for paths the core says can be restored from the index", () => {
