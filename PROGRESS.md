@@ -9,6 +9,59 @@
 
 ## Current state
 
+> **NEWEST (2026-09-03): frontend perf essentials (React Compiler, hooks rules, error boundary,
+> deferred search) + DESIGN.md/PRODUCT.md rewritten as enforceable rules — `Done — pending verify`,
+> uncommitted, full UI gate green. Details under "Decisions / changes this session"; next UI work
+> must follow DESIGN.md §0's Definition of Done and pick up the §13 gaps (font stack first).**
+
+> **LATEST (2026-09-03): TODO WORK-ITEM SURFACES + TAG VISIBILITY — `Done — pending verify`,
+> uncommitted on `feat/todo-workspace-ux`.** This is a narrow presentation pass over tracker #75/#76
+> (parity G3–G5 remain Verified; no coordination behavior or read-model changed). Todo rows are now
+> full-width shared shadcn `Card` surfaces with a sibling `Button` for the row action and locked-agent
+> navigation, preserving the no-nested-control keyboard contract. Status, blocker, comment, and tag
+> metadata use the app's shared `Badge` variants and existing semantic tokens. Tags have a dedicated
+> wrapping rail on collapsed rows and remain visible in the expanded detail masthead; every tag has
+> a Lucide tag icon, and visible tag labels deliberately have no duplicate native title or tooltip.
+> The detail pane uses the shared `Tooltip` only for its icon-only Copy/More controls, while the row
+> uses it only for agent-terminal navigation. The visible full title and badges do not duplicate
+> themselves in tooltips. Done todos and satisfied blockers remain readable through muted semantic
+> text plus explicit icon/label state, without strike styling.
+>
+> **Frontend-wide readability correction.** An `rg` audit across `crates/app/ui` found three app-
+> chrome strike treatments: done todo titles, satisfied blocker titles, and deleted Git paths. All
+> three were removed. Deleted paths retain the existing `D` glyph, accessible `Deleted` label, and
+> semantic deletion tone. No user-authored Markdown `<del>`/`<s>` presentation was found, so there
+> was no content-semantic exception to preserve. The touched todo sources contain no raw palette
+> utilities, literal colors, ad-hoc alpha colors, or manual dark-mode overrides.
+>
+> **Evidence.** The shadcn correction used `pnpm dlx shadcn@latest info --json` and `pnpm dlx
+> shadcn@latest docs badge button tooltip card collapsible`; the returned official component docs
+> were read before the correction, and no component was installed or overwritten. Earlier tag/wrap
+> assertions were observed red against the prior implementation, including the tag-icon assertion.
+> The correction's first focused batch found one stale assertion about where blocker truncation is
+> applied (4 files green, one assertion red); after correcting the assertion, the identical command
+> `pnpm exec vitest run src/components/orchestration/TodoItem.test.tsx
+> src/components/orchestration/TagList.test.tsx src/components/orchestration/TodoDetail.test.tsx
+> src/components/git/ChangesTree.test.tsx src/lib/git.test.ts` passed **5 files / 69 tests**.
+> Two accessibility/layout assertions were then observed red before the locked-agent action gained
+> an independent action-oriented accessible name, a 45% width cap, and a truncating visible-label
+> span. A third assertion was observed red against the inset/scaling card trigger before its content
+> became flush, radius-free, focus-inset, and explicitly stable at scale 1 while active. The restored
+> `TodoItem.test.tsx` passed **1 file / 17 tests**. No second typecheck was run because this follow-up
+> changed JSX attributes and utility classes only. `pnpm typecheck` passed (`tsc --noEmit`) for the
+> immediately preceding correction. The Impeccable detector had already run exactly once and
+> returned clean before the later shadcn/strike correction; it was not repeated to preserve the
+> requested one-run ceiling. Full lint, full test, and e2e were intentionally not run.
+> **Visual-runtime gap:** this pass has not been viewed in a live Tauri window, so card density, tag
+> wrapping, focus/hover polish, and tooltip placement still need real-window judgment at the minimum
+> pane width and at a comfortable desktop width.
+>
+> **Next session should start with:** run one bounded `just dev-alongside` visual pass on todos with
+> mixed statuses, blockers, comments, locks, and several mixed-length tags. Confirm the row surfaces
+> wrap without horizontal overflow, expanded details show the same tag badges, completed text stays
+> readable, and only Copy/More and agent navigation expose tooltips. If that looks right, commit this
+> focused UI/test slice and update the existing `feat/todo-workspace-ux` PR.
+
 > **LATEST (2026-09-02): TODO WORKSPACE UX — todo pane redesign, agent ↔ todo navigation, and
 > per-run session-work context in agent terminal headers. `Done — pending verify`, uncommitted on
 > `feat/todo-workspace-ux` (branched from `fe648f7`, v0.17.0).** Tracker todos #74–#78 from
@@ -3939,6 +3992,60 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 ---
 
 ## Decisions / changes this session
+
+### Frontend performance essentials + design-standard rewrite (2026-09-03) — `Done — pending verify`
+
+Uncommitted on `feat/todo-workspace-ux`, alongside the todo-workspace work below. Research first
+(`.scratch/research/frontend-perf-essentials.md`, verified against the installed packages, not
+articles), then six parallel implementers with disjoint write sets, then one full gate.
+
+- **React Compiler wired** (`babel-plugin-react-compiler` via `@vitejs/plugin-react` 6's
+  `reactCompilerPreset` + `@rolldown/plugin-babel`, build-time only). Verified compiled output in
+  production chunks (`.c)(n)` cache call sites: 112 in the entry chunk). Controlled A/B on the same
+  tree: entry chunk **142,014 → 158,117 bytes gzip (+16 KB)** with the compiler on; no render-time
+  measurement exists yet, so the win is unmeasured and the cost is recorded.
+- **`eslint-plugin-react-hooks` 7.1 recommended config enabled** (17 compiler-aware rules; the
+  config previously hand-listed two). The 28 violations it exposed (16 `set-state-in-effect`,
+  11 `refs`, 1 `immutability`, 22 files) were fixed by restructuring, with two justified
+  `eslint-disable-next-line` opt-outs (AppearanceProvider's mutation-queue ref; TodoBoard's
+  navigation effect). New tests: `useLoadOnce`, `useMermaidTheme`, `TimersPanel`,
+  `ThemeColorInput`; extended `useTerminalPool`, `useTemplates`.
+- **Compiler incompatibility found and fixed:** `@headless-tree` mutates behind stable identities,
+  so the git trees stopped updating under the compiler (16 tests red). Fix per the library's own
+  guide: `useTree` from `@headless-tree/react/react-compiler` in `RepositoryTree.tsx` plus
+  `"use no memo"` on `Tree`/`TreeItem`/`TreeItemChevron` in `ui/tree.tsx`; each half proven
+  load-bearing by reverting it alone.
+- **Pane-level error boundary** (`components/PaneErrorBoundary.tsx`, ~50-line class, reuses the
+  shadcn destructive `Alert`, "Try again" resets) around every lazy `Suspense` in `App.tsx`,
+  `DeferredOverlay`, `TitlebarActions`, `LazyRichTextEditor`. Before this a render error in any
+  pane blanked the whole webview.
+- **`useDeferredValue`** on the two typed-search derivations (`TodoBoard` filter, `DocumentRoster`
+  query); inputs stay live, derived lists/empty-state copy lag together. 3000-row tests added.
+- **Regression caught and fixed:** the components lint pass dropped
+  `navigatedNonces.set(project, focusNonce)` from TodoBoard's navigation effect; restored (test
+  "opens on the list when an activation it already acted on is still standing at mount" was the
+  catch). TodoBoard tests also gained the missing `TooltipProvider` wrap the in-flight todo work
+  needed.
+- **Not done, deliberately:** list virtualization (no measured jank; the todo board is a dnd-kit
+  sortable, so virtualizing it is a real change that needs evidence first); `react-doctor` ESLint
+  plugin (package name unverified).
+- **Gate (UI):** `pnpm lint` 0, `pnpm typecheck` 0, `pnpm format:check` clean, `pnpm test`
+  **188 files / 1437 tests green**, `pnpm build` green with the compiler on.
+- **DESIGN.md rewritten into 105 numbered rules** (`R0`–`R13`) with a 10-item Definition of Done,
+  a banned-pattern list and a §13 "known gaps" list; the frozen palette snapshot (lines 1–110) is
+  byte-identical. **PRODUCT.md** re-anchored to the locked direction (outlined controls + hairline
+  structure, in-app glass over the app's own content only, restrained native motion, WCAG 2.2 AA)
+  with the generic-AI-UI anti-references named. Research inputs and the lead's corrections live in
+  `.scratch/research/design/`. Verified facts recorded there: patched Ubuntu 22.04 ships
+  WebKitGTK 2.50.4 and 24.04 ships 2.52.6 (Launchpad); a feature probe on 2.52.6 supports
+  `@starting-style`, `linear()`, `allow-discrete`, scroll-driven animations, View Transitions,
+  `prefers-reduced-transparency`; `overlay` is unsupported.
+- **Open (tickets from DESIGN.md §13):** the sans font stack in `index.css` names only Apple faces
+  and Arial, so Ubuntu renders Liberation Sans (fix to a `system-ui`/Adwaita Sans/Ubuntu Sans
+  stack); no `LucideProvider`/`absoluteStrokeWidth` (icon stroke varies 1.0–2.0 px); no `aria-live`
+  for process/agent status; sidebar collapse not implemented; `card.tsx` radius/ring/footer tint;
+  `.impeccable/design.json` sidecar stale — run `/impeccable document` deliberately; vendored
+  `components/ui` audit incomplete (7 of ~36 checked).
 
 ### Local CLI inter-agent collaboration research — replace PTY injection (2026-08-31, docs-only)
 
