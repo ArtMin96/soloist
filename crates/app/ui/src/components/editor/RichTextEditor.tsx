@@ -21,6 +21,8 @@ export interface RichTextEditorProps {
   onSaveShortcut?: () => void;
   /** Fired when the editor loses focus — the caller flushes any pending save. */
   onBlur?: () => void;
+  /** Fired once, after the initial Markdown is seeded, so a caller can swap a stand-in for the content. */
+  onReady?: () => void;
   editable?: boolean;
   /** The empty-state prompt shown in the first empty block. */
   placeholder?: string;
@@ -43,6 +45,7 @@ export default function RichTextEditor({
   onChange,
   onSaveShortcut,
   onBlur,
+  onReady,
   editable = true,
   placeholder = "Press / for commands",
   toolbar = true,
@@ -55,6 +58,7 @@ export default function RichTextEditor({
   const onChangeRef = useLatestRef(onChange);
   const onSaveRef = useLatestRef(onSaveShortcut);
   const onBlurRef = useLatestRef(onBlur);
+  const onReadyRef = useLatestRef(onReady);
 
   const [findOpen, setFindOpen] = useState(false);
 
@@ -100,6 +104,7 @@ export default function RichTextEditor({
   useEffect(() => {
     if (!editor) return;
     editor.commands.setContent(initialMarkdown, { contentType: "markdown", emitUpdate: false });
+    onReadyRef.current?.();
     // The editor is recreated per document (a fresh key), so seeding once on creation is correct;
     // re-running on `initialMarkdown` would clobber live edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps

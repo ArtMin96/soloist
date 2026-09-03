@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
+import { LoadingStandIn } from "@/components/common/LoadingStandIn";
 import { RecoveryNotice } from "@/components/common/RecoveryNotice";
-import { cn } from "@/lib/utils";
 import { LoadStatus, type Loadable } from "@/store/loadable";
 
 interface LoadableRegionProps<T> {
@@ -36,10 +36,9 @@ export function LoadableRegion<T>({
   switch (state.status) {
     case LoadStatus.Loading:
       return (
-        <div role="status" aria-busy="true" className={cn("animate-skeleton-reveal", className)}>
-          <span className="sr-only">Loading {label}</span>
-          <div aria-hidden>{skeleton}</div>
-        </div>
+        <LoadingStandIn label={label} className={className}>
+          {skeleton}
+        </LoadingStandIn>
       );
     case LoadStatus.Ready:
       return children(state.value);

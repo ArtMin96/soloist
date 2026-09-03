@@ -537,6 +537,17 @@ motion the pulse is static and the delay stays, since a delay is not motion.
 *A false empty state (an "empty" message rendered before the first read has resolved) or a bare
 spinner standing in for a whole region is a bug, not a loading state.*
 
+Rendered Markdown is the leaf case of the same rule. `MarkdownView` is the authoring editor held
+read-only, so it costs a frame to start: it paints its prose one pass after the frame it is mounted
+in, and until the editor reports its content seeded it holds one stand-in of prose lines (bars at
+the body's own line pitch, as many as the text is long) with the editor building itself invisibly
+beneath, so there is no blank gap and no second wait between the chunk landing and the words. The
+wrapper that marks a wait (`role="status"`, `aria-busy`, the sr-only label, the `--skeleton-delay`
+reveal) is `LoadingStandIn` in `components/common`, shared by `LoadableRegion` and `MarkdownView` so
+a region and an inline body wait identically. A body announces itself when it is the whole of a
+region ("Loading description") and stays silent when the structure around it already reads, as a
+comment under its author line does, so a thread of ten bodies does not announce ten waits.
+
 **R7.8 — Error state (fields):** `aria-invalid` shifts the border to `error` and adds a 2px
 `error`-tinted ring; the fill stays `input` — never a full-field error tint, which reads as blocked
 rather than invalid.
