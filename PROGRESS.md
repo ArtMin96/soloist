@@ -9,7 +9,103 @@
 
 ## Current state
 
-> **NEWEST (2026-09-03): frontend perf essentials (React Compiler, hooks rules, error boundary,
+> **NEWEST (2026-09-03): REGION LOADING SYSTEM + HONEST TODO PANE LOADING — `Done — pending verify`,
+> uncommitted on `feat/todo-workspace-ux`.**
+> `useOrchestration` returned an empty snapshot until the `orchestrationSnapshot` IPC resolved, so
+> `OrchestrationPane` handed that empty model to `TodoBoard` and the pane painted "No todos yet" for
+> the whole gap. That is a false empty state: a claim about the project made on the strength of a read
+> that has not answered. No store hook in the app exposed a loading phase, so no surface could have
+> rendered anything honest.
+>
+> **The system** (all under `crates/app/ui/src`). `store/loadable.ts` holds the closed phase model
+> `Loadable<T>` (`LoadStatus.Loading | Ready | Failed`) with `loading()` (one frozen constant),
+> `ready()` and `failed()`. `components/common/LoadableRegion.tsx` is the one component that renders a
+> phase: the loading branch puts the skeleton in a `role="status" aria-busy` wrapper carrying an
+> sr-only "Loading {label}" and reveals it only after `--skeleton-delay`; the ready branch renders
+> children bare so existing layouts are untouched; the failed branch shows the shared recovery notice
+> with a retry. `components/common/RecoveryNotice.tsx` was extracted out of
+> `components/PaneErrorBoundary.tsx`, which now routes to it (that boundary's test is unchanged and
+> green). `components/ui/skeleton.tsx` is the shadcn primitive, installed with `pnpm dlx shadcn@latest
+> add skeleton --yes` (radix-nova style, `animate-pulse rounded-md bg-muted`), never hand-written.
+> `components/common/SkeletonList.tsx` is an `aria-hidden` list of stand-in rows.
+> `components/orchestration/TodoBoardSkeleton.tsx` mirrors the board's toolbar strip and card rows
+> using the real `Card` frame, `TODO_SKELETON_ROWS` (6) rows with cycling title widths. `index.css`
+> gained the `--skeleton-delay: 150ms` token, the `--animate-skeleton-reveal` utility and its
+> `@keyframes skeleton-reveal`. Changing loading behaviour later means editing `LoadableRegion`, the
+> `index.css` token, or `loadable.ts`, never a call site. That one-place-to-change property is the
+> whole point of the system.
+>
+> **The pane.** `store/useOrchestration.ts` now returns
+> `{ snapshot: Loadable<OrchestrationReadModel>, error, refresh }`. A failure is bound to the project
+> it was read for, a successful model is committed inside `startTransition`, a failed re-read keeps
+> `ready` and sets `error`, and the next successful read clears it.
+> `components/orchestration/OrchestrationPane.tsx` has one `VIEW_LABEL` source used by both the
+> switcher and the region label, a `useDeferredValue(view)` so the switcher stays urgent while the
+> body settles, a `VIEW_SKELETON` registry (todos to `TodoBoardSkeleton`, each of the other five views
+> to a generic `SkeletonList` of `VIEW_SKELETON_ROWS`, 8, rows), and a timer count on the switcher
+> only while the snapshot is ready.
+>
+> **Decision: explicit `Loadable` rather than Suspense for data.** The app's hooks are
+> subscription-based (snapshot, then deltas), so Suspense would need a promise cache and would become
+> a second data paradigm beside the one every store hook already uses. React concurrency is used where
+> it pays instead: `startTransition` on the snapshot commit, `useDeferredValue` on the view switch.
+>
+> **DESIGN.md reversal.** R7.7 was narrowed to controls and a new **R7.7b, Region loading state**, was
+> added (skeleton mirroring the resting layout via `LoadableRegion`, delayed reveal, a11y, retry,
+> stale-while-revalidate, reduced motion). The §12 anti-pattern "Skeleton-screen placeholders" was
+> replaced by "A region that lies about its first read", and the motion table gained a
+> `--skeleton-delay` row. This reverses a documented anti-pattern, by the owner's explicit decision to
+> use shadcn's skeleton loader app-wide.
+>
+> **Evidence.** Built as three implementation waves with disjoint write sets plus one closing pass.
+> Wave 1 owned the shared parts (`store/loadable.ts`, `components/common/LoadableRegion.tsx` and its
+> test, `RecoveryNotice.tsx`, `PaneErrorBoundary.tsx`, `components/ui/skeleton.tsx`,
+> `SkeletonList.tsx`, `index.css`); wave 2 owned `store/useOrchestration.ts` with its test and
+> `TodoBoardSkeleton.tsx`; wave 3 owned `OrchestrationPane.tsx`, its new test, and `DESIGN.md`; the
+> closing pass added `src/test/heldRead.ts` and routed both suites' duplicated `holdRead` helper to it.
+> The pane's regression test, "shows the to-do stand-in, not an empty state, while the first snapshot
+> is in flight", was observed red against the old pane with
+> `expected <h2 data-slot="empty-title">…</h2> to be null`. In `useOrchestration.test.tsx` the four
+> existing tests were rewritten to read through the loadable and four phase tests were added, each new
+> one observed red by mutating the hook. `LoadableRegion.test.tsx` and `OrchestrationPane.test.tsx`
+> carry four tests each.
+>
+> Gates, run once from the repo root after the dedupe: `pnpm -C crates/app/ui typecheck`
+> (`tsc --noEmit`) clean; `pnpm -C crates/app/ui lint` (`eslint .`) clean; `pnpm -C crates/app/ui run
+> format:check` clean; `pnpm -C crates/app/ui test` **189 files / 1448 tests passed, 1 file / 1 test
+> failed**. That failure is `TodoBoard.test.tsx > "keeps the search box live and settles the filtered
+> list to the matching row, even over a large board"` timing out at the 20s `testTimeout` under
+> full-suite load; re-run on its own the file passes **1 file / 22 tests**, and it is not a file this
+> change set touches (last written in `c94397a`). `node scripts/check-theme-colors.mjs` clean;
+> `./scripts/check-file-size.sh` clean (non-gating, and no file from this change set appears in its
+> over-400-line report). The change set's own suites pass **4 files / 18 tests**
+> (`useOrchestration`, `OrchestrationPane`, `LoadableRegion`, `PaneErrorBoundary`). React Doctor
+> (`npx react-doctor@latest --verbose --scope changed`, 90 files) scored **82/100 with 42 warnings**;
+> the only finding inside a file this change set touched is `react-compiler-no-manual-memoization` at
+> `useOrchestration.ts:85`, `:90` and `:164`. The first two are the pre-existing `useCallback`s
+> carried over from HEAD, and `refresh` is a dependency of the subscribe effect, so its identity is
+> load-bearing. The rule fires 38 times across 14 files on this branch, so it is a codebase-wide
+> pattern rather than a regression introduced here; nothing was changed for it. The cargo gates were
+> not run because `git diff --stat` shows no Rust file in the change set.
+>
+> **Not verified.** There has been no live Tauri window pass: nobody has seen a skeleton render in
+> WebKitGTK, so the delay, the reveal, the card rhythm, and the recovery notice have had no
+> real-window judgment. The five non-todo orchestration views use the generic `SkeletonList` stand-in
+> rather than a mirrored one. The git hooks (`store/git/useGitStatus.ts`, `useGitFiles.ts`,
+> `useGitDiff.ts`, `useFilePreview.ts`, `usePullRequest.ts`, all via `useRepositoryRead.ts`) and
+> `store/cache/usePersistentSnapshot.ts` still hand-roll `loading` plus `value | null`, so the system
+> is app-wide by design and not yet by adoption. `e2e/src/screens/OrchestrationPane.ts` keeps its own
+> copy of the view labels (pre-existing).
+>
+> **Next session should start with:** run one bounded `just dev-alongside` visual pass on the
+> orchestration pane. Open a project with several todos, switch to To-dos, and confirm the card
+> skeleton appears only when the read takes longer than about 150ms and that a false "No todos yet"
+> never appears; switch views and confirm the switcher never lags; force a failed read to see the
+> recovery notice. Then migrate `useRepositoryRead`'s consumers and `usePersistentSnapshot` to
+> `Loadable` plus `LoadableRegion`, one hook per task, with a mirrored skeleton per surface. Then
+> commit this slice and update the `feat/todo-workspace-ux` PR.
+
+> **LATEST (2026-09-03): frontend perf essentials (React Compiler, hooks rules, error boundary,
 > deferred search) + DESIGN.md/PRODUCT.md rewritten as enforceable rules — `Done — pending verify`,
 > uncommitted, full UI gate green. Details under "Decisions / changes this session"; next UI work
 > must follow DESIGN.md §0's Definition of Done and pick up the §13 gaps (font stack first).**
@@ -3992,6 +4088,22 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 ---
 
 ## Decisions / changes this session
+
+### Region loading system (2026-09-03) — `Done — pending verify`
+
+- **DESIGN.md reversal, by the owner's explicit decision** (the owner asked for shadcn's skeleton
+  loader app-wide). Skeleton stand-ins are now the region loading treatment: R7.7 was narrowed to
+  controls, new **R7.7b, Region loading state**, defines the treatment (a stand-in mirroring the
+  region's resting layout through `LoadableRegion`, revealed only after `--skeleton-delay`, with the
+  a11y wrapper, the retry, stale-while-revalidate on re-read, and the reduced-motion behaviour), the
+  §12 anti-pattern "Skeleton-screen placeholders" was replaced by "A region that lies about its first
+  read", and the motion table gained a `--skeleton-delay` row.
+- **Explicit `Loadable` over Suspense for data.** Every read-model hook returns the closed
+  `Loadable<T>` phase and `LoadableRegion` is the one component that renders it. Suspense for data
+  was rejected because the app's hooks are subscription-based (snapshot, then deltas): it would need
+  a promise cache and would become a second data paradigm beside the one every store hook already
+  uses. React concurrency is used where it pays instead, `startTransition` on the snapshot commit and
+  `useDeferredValue` on the view switch.
 
 ### Frontend performance essentials + design-standard rewrite (2026-09-03) — `Done — pending verify`
 
