@@ -521,9 +521,21 @@ in the tab sequence for discoverability in toolbars/menus) rather than `disabled
 matters. Prefer omitting an unavailable action entirely over rendering it disabled when the action
 simply doesn't exist in the current lifecycle state (e.g. Stop on an already-Stopped process).
 
-**R7.7 — Loading state:** a 1.5s opacity pulse on the affected glyph/label
+**R7.7 — Loading state (controls):** a 1.5s opacity pulse on the affected glyph/label
 (`prefers-reduced-motion: reduce` → static), the triggering control disabled (40% opacity) for the
 duration.
+
+**R7.7b — Region loading state:** a data region (list, board, roster, document) whose first read has
+not landed renders a `Skeleton` stand-in of its own resting layout, at the same row heights and
+gaps, so nothing shifts when the data arrives. `LoadableRegion` in `components/common` is the one
+component that does this: it reveals the stand-in only after `--skeleton-delay` (150ms), so a read
+that lands inside that window never flashes one; it carries `role="status"` and `aria-busy` with an
+sr-only label naming what is loading ("Loading todos"), and marks the stand-in itself `aria-hidden`.
+A failed first read shows the shared recovery notice with a retry. A re-read while a value is on
+screen keeps that value: a region already showing data never falls back to a stand-in. Under reduced
+motion the pulse is static and the delay stays, since a delay is not motion.
+*A false empty state (an "empty" message rendered before the first read has resolved) or a bare
+spinner standing in for a whole region is a bug, not a loading state.*
 
 **R7.8 — Error state (fields):** `aria-invalid` shifts the border to `error` and adds a 2px
 `error`-tinted ring; the fill stays `input` — never a full-field error tint, which reads as blocked
@@ -570,6 +582,7 @@ combination inline — it composes `components/ui` primitives.
 | Medium | `--dur-control` | 220ms | `--ease-spring-settle` | Segmented thumb, switch knob, disclosure |
 | Medium | `--dur-sheet` | 300ms | `--ease-spring-settle` | Dialog/sheet present |
 | Loop | `--dur-shimmer` | 2200ms | linear, infinite | Working-label shimmer sweep |
+| Delay | `--skeleton-delay` | 150ms | none | Wait before a loading stand-in is revealed (R7.7b) |
 
 **R8.2 — `--ease-spring` (critically damped, no overshoot) is the default for all utilitarian
 motion.** `--ease-spring-settle` (bounce 0.12, ~0.3% peak) is reserved for mechanical metaphors —
@@ -774,8 +787,10 @@ the one status→token map (R2.6).
   (R2.8).
 - **Uppercase tracked eyebrow labels** — tiny tracked-UPPERCASE section headers (R4.5).
 - **Icon soup** — icons that don't carry distinct meaning from adjacent text (R6.6).
-- **Skeleton-screen placeholders.** Use a spinner or a subdued opacity pulse (R7.7), never a faded
-  placeholder box grid — decoration, not perceived-performance help, in a UI this small.
+- **A region that lies about its first read** — its empty state or a bare spinner rendered before
+  that read has resolved, or a stand-in that does not mirror the region's resting layout (a generic
+  placeholder box grid). The stand-in is `LoadableRegion`'s, drawn at the row heights and gaps the
+  real content uses (R7.7b).
 - **A cross-fade as the default transition**, or `transition-opacity` where a thing should move — a
   fade-everywhere reads as web, not native (§8, Spring-Not-Fade).
 - **Bounce/elastic easing on utilitarian controls**, or a selection "pill" that travels between

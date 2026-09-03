@@ -1,7 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
-import { TriangleAlert } from "lucide-react";
-import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { RecoveryNotice } from "@/components/common/RecoveryNotice";
 
 interface PaneErrorBoundaryProps {
   children: ReactNode;
@@ -35,18 +33,6 @@ export class PaneErrorBoundary extends Component<PaneErrorBoundaryProps, PaneErr
   render() {
     if (!this.state.hasError) return this.props.children;
     const name = this.props.label ?? "This pane";
-    return (
-      <div className="flex w-full justify-center p-3">
-        <Alert variant="destructive" className="max-w-sm">
-          <TriangleAlert aria-hidden />
-          <AlertDescription>{name} ran into a problem.</AlertDescription>
-          <AlertAction className="top-1/2 -translate-y-1/2">
-            <Button variant="outline" size="sm" onClick={this.retry}>
-              Try again
-            </Button>
-          </AlertAction>
-        </Alert>
-      </div>
-    );
+    return <RecoveryNotice message={`${name} ran into a problem.`} onRetry={this.retry} />;
   }
 }
