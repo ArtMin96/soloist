@@ -1,4 +1,5 @@
 import { Suspense, lazy, type ComponentProps, type ReactNode } from "react";
+import { PaneErrorBoundary } from "@/components/PaneErrorBoundary";
 import type RichTextEditor from "./RichTextEditor";
 
 // The rich editor is loaded lazily so the whole @tiptap dependency graph lands in its own chunk and
@@ -22,8 +23,10 @@ export function LazyRichTextEditor({
   ...props
 }: LazyRichTextEditorProps) {
   return (
-    <Suspense fallback={fallback}>
-      <RichTextEditorLazy {...props} />
-    </Suspense>
+    <PaneErrorBoundary label={props.ariaLabel}>
+      <Suspense fallback={fallback}>
+        <RichTextEditorLazy {...props} />
+      </Suspense>
+    </PaneErrorBoundary>
   );
 }
