@@ -21,11 +21,13 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { humanizeName } from "@/lib/humanize";
 import { TODO_STATUS, TODO_STATUS_ICON, TODO_STATUS_TONE, unmetBlockerLabel } from "@/lib/todo";
 import { cn } from "@/lib/utils";
@@ -124,13 +126,12 @@ export function TodoDetail({
             size="sm"
             onClick={onBack}
             aria-label="Back to todos"
-            title="Back to todos"
             className={cn(
               "-ml-2.5 min-w-0 text-muted-foreground @max-[20rem]/detail-header:ml-0",
               SQUARE_WIDE,
             )}
           >
-            <ChevronLeft aria-hidden />
+            <ChevronLeft aria-hidden data-icon="inline-start" />
             {/* Names the destination, which is what a back control in a two-panel board should say. */}
             <span className={LABEL_WIDE}>Todos</span>
           </Button>
@@ -140,8 +141,8 @@ export function TodoDetail({
             // Band 1 stays occupied in edit mode, so the way out of editing is never below the fold
             // on a long todo. `useAutosave` commits on unmount, which this triggers, so leaving does
             // not need an explicit flush of its own.
-            <Button size="sm" onClick={edit.onDone} data-todo-done title="Finish editing">
-              <Check aria-hidden />
+            <Button size="sm" onClick={edit.onDone} data-todo-done>
+              <Check aria-hidden data-icon="inline-start" />
               <span className={LABEL_FLOOR}>Done</span>
             </Button>
           ) : (
@@ -236,20 +237,20 @@ function TodoMetaRail({ todo }: { todo: TodoView }) {
         variant="tinted"
         className={cn("shrink-0", TODO_STATUS_TONE[todo.doc.status])}
       >
-        <StatusIcon aria-hidden />
+        <StatusIcon aria-hidden data-icon="inline-start" />
         <span className="text-foreground">{TODO_STATUS[todo.doc.status]}</span>
       </Badge>
 
       {/* The gate on the primary action sitting two bands above, so it belongs in the masthead
           rather than only in the Blockers section further down. */}
       {todo.blocked_by.length > 0 && (
-        <span className="type-label flex shrink-0 items-center gap-1.5 text-muted-foreground">
-          <ShieldAlert aria-hidden className="size-3.5 text-status-attention" />
+        <Badge variant="outline" className="shrink-0">
+          <ShieldAlert aria-hidden data-icon="inline-start" className="text-status-attention" />
           {unmetBlockerLabel(todo.blocked_by.length)}
-        </span>
+        </Badge>
       )}
 
-      <TagList tags={todo.tags} className="flex-wrap" />
+      <TagList tags={todo.tags} wrap />
     </div>
   );
 }
@@ -266,9 +267,8 @@ interface TodoActionsProps {
 // The header's action cluster, ordered secondary → separator → primary so Complete is the terminal
 // element of the row and unmistakably the one action that finishes the todo. Three shed steps carry
 // it down to a 184px pane: labels go first, then the secondary pair folds into a menu, and Complete
-// keeps its word longest. Deliberately no Radix `Tooltip` — it needs a `TooltipProvider` ancestor
-// and throws without one, which would make this panel unmountable on its own; `DropdownMenu`
-// self-provides its context, so the overflow menu is safe here.
+// keeps its word longest. Icon-only actions use the shared tooltip so their meaning remains visible
+// to pointer and keyboard users after their labels shed.
 function TodoActions({ done, busy, onComplete, onCopyLink, onStartEdit }: TodoActionsProps) {
   return (
     <>
@@ -277,23 +277,26 @@ function TodoActions({ done, busy, onComplete, onCopyLink, onStartEdit }: TodoAc
           variant="ghost"
           size="sm"
           onClick={onStartEdit}
-          title="Edit todo"
           className={cn("text-muted-foreground", SQUARE_WIDE)}
         >
-          <Pencil aria-hidden />
+          <Pencil aria-hidden data-icon="inline-start" />
           <span className={LABEL_WIDE}>Edit</span>
         </Button>
 
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={onCopyLink}
-          aria-label="Copy link to todo"
-          title="Copy link to todo"
-          className="text-muted-foreground"
-        >
-          <Link2 aria-hidden />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={onCopyLink}
+              aria-label="Copy link to todo"
+              className="text-muted-foreground"
+            >
+              <Link2 aria-hidden />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Copy link to todo</TooltipContent>
+        </Tooltip>
 
         {/* Only ever drawn beside Complete: on a done todo it would point at nothing. `h-4` beats
             the primitive's `self-stretch`, which would otherwise run the rule the band's full height. */}
@@ -301,24 +304,30 @@ function TodoActions({ done, busy, onComplete, onCopyLink, onStartEdit }: TodoAc
       </div>
 
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="More actions"
-            title="More actions"
-            className={cn("text-muted-foreground", MENU_BELOW)}
-          >
-            <MoreHorizontal aria-hidden />
-          </Button>
-        </DropdownMenuTrigger>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="More actions"
+                className={cn("text-muted-foreground", MENU_BELOW)}
+              >
+                <MoreHorizontal aria-hidden />
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent>More todo actions</TooltipContent>
+        </Tooltip>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={onStartEdit}>
-            <Pencil aria-hidden /> Edit todo
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={onCopyLink}>
-            <Link2 aria-hidden /> Copy link to todo
-          </DropdownMenuItem>
+          <DropdownMenuGroup>
+            <DropdownMenuItem onSelect={onStartEdit}>
+              <Pencil aria-hidden /> Edit todo
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onCopyLink}>
+              <Link2 aria-hidden /> Copy link to todo
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -328,14 +337,16 @@ function TodoActions({ done, busy, onComplete, onCopyLink, onStartEdit }: TodoAc
           onClick={onComplete}
           disabled={busy}
           aria-busy={busy}
-          title="Complete todo"
           className={SQUARE_FLOOR}
         >
-          {/* The spinner is sized here because the primitive bakes in `size-4`, which the button's
-              own svg-sizing selector therefore cannot correct; `aria-hidden` suppresses its built-in
-              "Loading" so the state is announced once, by `aria-busy`. Under reduced motion the root
-              safety net freezes the spin, which is why the text swap stays as the carrier. */}
-          {busy ? <Spinner aria-hidden className="size-3.5" /> : <Check aria-hidden />}
+          {/* `aria-hidden` suppresses the spinner's built-in "Loading" so the state is announced
+              once, by `aria-busy`. The text swap remains the carrier when reduced motion freezes
+              the spin. */}
+          {busy ? (
+            <Spinner aria-hidden data-icon="inline-start" />
+          ) : (
+            <Check aria-hidden data-icon="inline-start" />
+          )}
           <span className={LABEL_FLOOR}>{busy ? "Completing…" : "Complete"}</span>
         </Button>
       )}
@@ -382,7 +393,7 @@ function TodoProvenance({ todo, lockOwnerLabel, onOpenAgent }: TodoProvenancePro
               onClick={() => onOpenAgent?.(lockedBy)}
               className="-ml-2 max-w-full"
             >
-              <Lock aria-hidden />
+              <Lock aria-hidden data-icon="inline-start" />
               <span className="min-w-0 truncate">{lockOwnerLabel ?? `#${lockedBy}`}</span>
             </Button>
           )}
@@ -394,7 +405,7 @@ function TodoProvenance({ todo, lockOwnerLabel, onOpenAgent }: TodoProvenancePro
 
 // The todos this one waits on, at the top of the panel because they are the gate on completing it.
 // `blocked_by` is the unmet subset the core derives — those are the ones still holding it; the rest
-// are already done and struck through. The list scrolls past six entries rather than growing without
+// are already done and shown with quieter text. The list scrolls past six entries rather than growing without
 // bound, so a heavily blocked todo cannot push its own description off the pane.
 function TodoBlockers({
   todo,
@@ -418,7 +429,7 @@ function TodoBlockers({
               <span
                 className={cn(
                   "type-body min-w-0 flex-1 truncate",
-                  unmet.has(id) ? "text-foreground" : "text-muted-foreground line-through",
+                  unmet.has(id) ? "text-foreground" : "text-muted-foreground",
                 )}
               >
                 {titleOf(id) ?? `Todo #${id}`}

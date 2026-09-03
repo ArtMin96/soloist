@@ -10,12 +10,11 @@ interface TodoRowSummaryProps {
   done: boolean;
 }
 
-// What a todo card says about itself in the list, on two lines flush to the same left edge: the
-// title with its declared status, then the id, the blocker gate, the tags, and the comment count.
-// Two lines rather than one because on a single baseline every one of those competes with the title
-// for the same few pixels, and the title is the only thing a person scans for. Nothing here is
-// interactive — the whole block is the content of the row's own button, so any control would nest
-// inside another one.
+// What a todo card says about itself in the list, on lines flush to the same left edge: title and
+// declared status first, then operational metadata, with a wrapping tag rail only when tags exist.
+// Separating them keeps every badge from competing with the title for the same few pixels. Nothing
+// here is interactive — the whole block is the content of the row's own button, so any control
+// would nest inside another one.
 export function TodoRowSummary({ todo, done }: TodoRowSummaryProps) {
   const StatusIcon = TODO_STATUS_ICON[todo.doc.status];
 
@@ -26,7 +25,7 @@ export function TodoRowSummary({ todo, done }: TodoRowSummaryProps) {
           data-todo-title
           className={cn(
             "type-body min-w-0 flex-1 truncate font-[550]",
-            done ? "text-muted-foreground line-through" : "text-foreground",
+            done ? "text-muted-foreground" : "text-foreground",
           )}
         >
           {todo.doc.title}
@@ -39,7 +38,7 @@ export function TodoRowSummary({ todo, done }: TodoRowSummaryProps) {
           variant="tinted"
           className={cn("shrink-0", TODO_STATUS_TONE[todo.doc.status])}
         >
-          <StatusIcon aria-hidden className="shrink-0" />
+          <StatusIcon aria-hidden data-icon="inline-start" />
           <span className="type-label text-foreground">{TODO_STATUS[todo.doc.status]}</span>
         </Badge>
       </div>
@@ -54,25 +53,33 @@ export function TodoRowSummary({ todo, done }: TodoRowSummaryProps) {
         {todo.blocked_by.length > 0 && (
           // A shield, not the declared status's ban glyph: this is the derived gate, and the two
           // must not wear the same mark on a row that can show both at once.
-          <span
-            data-todo-blockers
-            className="type-label flex min-w-0 shrink items-center gap-1 truncate text-muted-foreground"
-          >
-            <ShieldAlertIcon aria-hidden className="size-3.5 shrink-0 text-status-attention" />
+          <Badge data-todo-blockers variant="outline" className="min-w-0 shrink">
+            <ShieldAlertIcon
+              aria-hidden
+              data-icon="inline-start"
+              className="text-status-attention"
+            />
             <span className="min-w-0 truncate">{unmetBlockerLabel(todo.blocked_by.length)}</span>
-          </span>
+          </Badge>
         )}
-        <TagList tags={todo.tags} />
         {todo.comments.length > 0 && (
-          <span
+          <Badge
             data-todo-comments
-            className="type-label ml-auto flex shrink-0 items-center gap-1 text-muted-foreground"
+            aria-label={`${todo.comments.length} ${todo.comments.length === 1 ? "comment" : "comments"}`}
+            variant="muted"
+            className="ml-auto shrink-0"
           >
-            <MessageSquareIcon aria-hidden className="size-3.5" />
+            <MessageSquareIcon aria-hidden data-icon="inline-start" />
             {todo.comments.length}
-          </span>
+          </Badge>
         )}
       </div>
+
+      {todo.tags.length > 0 && (
+        <span data-todo-tag-row className="flex w-full min-w-0 items-center">
+          <TagList tags={todo.tags} wrap className="w-full" />
+        </span>
+      )}
     </>
   );
 }

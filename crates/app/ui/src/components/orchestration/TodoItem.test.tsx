@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TodoItem } from "@/components/orchestration/TodoItem";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import type { ScratchpadRef, TodoStatus, TodoView } from "@/domain";
 
 afterEach(cleanup);
@@ -28,7 +29,9 @@ function todo(overrides: Partial<TodoView> = {}): TodoView {
 
 function row(overrides: Partial<Parameters<typeof TodoItem>[0]> = {}) {
   return render(
-    <TodoItem todo={todo()} onOpen={vi.fn()} lockOwnerLabel={undefined} {...overrides} />,
+    <TooltipProvider delayDuration={0}>
+      <TodoItem todo={todo()} onOpen={vi.fn()} lockOwnerLabel={undefined} {...overrides} />
+    </TooltipProvider>,
   );
 }
 
@@ -38,6 +41,45 @@ describe("TodoItem", () => {
 
     expect(screen.getByText("a")).toBeTruthy();
     expect(screen.getByText("b")).toBeTruthy();
+    const tags = document.querySelector("[data-tags]") as HTMLElement;
+    expect(tags.parentElement?.getAttribute("data-todo-tag-row")).not.toBeNull();
+    expect(tags.className).toContain("flex-wrap");
+  });
+
+  it("composes the work item from the shared card, button and badge primitives", () => {
+    row({
+      todo: todo({
+        tags: ["release"],
+        blockers: [2],
+        blocked_by: [2],
+        comments: [{ id: 1, body: "Ready", author: null }],
+      }),
+    });
+
+    expect(document.querySelector("[data-todo-card]")?.getAttribute("data-slot")).toBe("card");
+    expect(document.querySelector("[data-todo-trigger]")?.getAttribute("data-slot")).toBe("button");
+    for (const selector of [
+      "[data-todo-status]",
+      "[data-todo-blockers]",
+      "[data-todo-comments]",
+      "[data-tag]",
+    ]) {
+      expect(document.querySelector(selector)?.getAttribute("data-slot")).toBe("badge");
+    }
+  });
+
+  it("uses one flush, geometry-stable surface for the card action", () => {
+    row();
+
+    const content = document.querySelector('[data-slot="card-content"]') as HTMLElement;
+    const trigger = document.querySelector("[data-todo-trigger]") as HTMLElement;
+
+    expect(content.className).toContain("p-0");
+    expect(content.className).toContain("gap-0");
+    expect(trigger.className).toContain("rounded-none");
+    expect(trigger.className).toContain("active:not-aria-[haspopup]:scale-100");
+    expect(trigger.className).not.toContain("scale-[0.97]");
+    expect(trigger.className).toContain("focus-visible:ring-inset");
   });
 
   it("yields the title alone on the first line, so the status label is never clipped", () => {
@@ -54,13 +96,13 @@ describe("TodoItem", () => {
     // readable, so the chip holds its natural width and its label never truncates.
     const status = document.querySelector("[data-todo-status]") as HTMLElement;
     expect(status.className).toContain("shrink-0");
-    expect(status.querySelector("svg")?.getAttribute("class")).toContain("shrink-0");
+    expect(status.querySelector("svg")?.getAttribute("data-icon")).toBe("inline-start");
     expect(status.querySelector("span")?.className).not.toContain("truncate");
 
     // The meta line still clips, so it cannot spill under the sibling agent control.
     const blockers = document.querySelector("[data-todo-blockers]") as HTMLElement;
     expect(blockers.className).toContain("min-w-0");
-    expect(blockers.className).toContain("truncate");
+    expect(blockers.querySelector("span")?.className).toContain("truncate");
   });
 
   it("renders its id and its status label", () => {
@@ -124,12 +166,34 @@ describe("TodoItem", () => {
   it("activates the agent control without opening the todo", () => {
     const onOpenAgent = vi.fn();
     const onOpen = vi.fn();
-    row({ todo: todo({ locked_by: 9 }), onOpenAgent, onOpen });
+    row({ todo: todo({ locked_by: 9 }), lockOwnerLabel: "worker-a", onOpenAgent, onOpen });
 
-    fireEvent.click(document.querySelector("[data-todo-agent]") as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Open worker-a terminal" }));
 
     expect(onOpenAgent).toHaveBeenCalledWith(9);
     expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("caps a long agent name and truncates only its visible label", () => {
+    const label = "release-coordinator-with-an-unusually-long-process-name";
+    row({ todo: todo({ locked_by: 9 }), lockOwnerLabel: label, onOpenAgent: vi.fn() });
+
+    const agent = screen.getByRole("button", { name: `Open ${label} terminal` });
+    const visibleLabel = agent.querySelector("[data-todo-agent-label]") as HTMLElement;
+
+    expect(agent.className).toContain("max-w-");
+    expect(agent.className).toContain("min-w-0");
+    expect(visibleLabel.textContent).toBe(label);
+    expect(visibleLabel.className).toContain("min-w-0");
+    expect(visibleLabel.className).toContain("truncate");
+  });
+
+  it("explains the agent navigation action when its control receives focus", async () => {
+    row({ todo: todo({ locked_by: 9 }), lockOwnerLabel: "worker-a", onOpenAgent: vi.fn() });
+
+    fireEvent.focus(document.querySelector("[data-todo-agent]") as HTMLElement);
+
+    expect((await screen.findByRole("tooltip")).textContent).toBe("Open worker-a terminal");
   });
 
   it("is keyboard-reachable as its own tab stop, separate from the card's button", () => {

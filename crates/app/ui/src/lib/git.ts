@@ -21,24 +21,21 @@ export interface ChangeDisplay {
   label: string;
   /** Tailwind text-color utility, bound to a `--git-*` token. */
   toneClass: string;
-  /** A path that no longer exists is drawn struck through, so the row reads as gone. */
-  gone: boolean;
 }
 
 export const CHANGE: Record<ChangeKind, ChangeDisplay> = {
-  modified: { letter: "M", label: "Modified", toneClass: "text-git-modified", gone: false },
+  modified: { letter: "M", label: "Modified", toneClass: "text-git-modified" },
   type_changed: {
     letter: "T",
     label: "Type changed",
     toneClass: "text-git-modified",
-    gone: false,
   },
-  added: { letter: "A", label: "Added", toneClass: "text-git-added", gone: false },
-  deleted: { letter: "D", label: "Deleted", toneClass: "text-git-deleted", gone: true },
-  renamed: { letter: "R", label: "Renamed", toneClass: "text-git-added", gone: false },
-  copied: { letter: "C", label: "Copied", toneClass: "text-git-added", gone: false },
-  untracked: { letter: "U", label: "Untracked", toneClass: "text-git-added", gone: false },
-  conflicted: { letter: "C", label: "Conflicted", toneClass: "text-git-conflicted", gone: false },
+  added: { letter: "A", label: "Added", toneClass: "text-git-added" },
+  deleted: { letter: "D", label: "Deleted", toneClass: "text-git-deleted" },
+  renamed: { letter: "R", label: "Renamed", toneClass: "text-git-added" },
+  copied: { letter: "C", label: "Copied", toneClass: "text-git-added" },
+  untracked: { letter: "U", label: "Untracked", toneClass: "text-git-added" },
+  conflicted: { letter: "C", label: "Conflicted", toneClass: "text-git-conflicted" },
 };
 
 /** The tone a path version control was told to ignore is drawn in, on the Files tab. */

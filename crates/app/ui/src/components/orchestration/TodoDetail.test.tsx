@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { DETAIL_MEASURE } from "@/components/orchestration/DetailPaneHeader";
 import { TodoDetail, type TodoEditState } from "@/components/orchestration/TodoDetail";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { TODO_STATUS, TODO_STATUS_ORDER, TODO_STATUS_TONE } from "@/lib/todo";
 import type { ScratchpadRef, TodoStatus, TodoView } from "@/domain";
 
@@ -65,21 +66,23 @@ function editState(overrides: Partial<TodoEditState> = {}): TodoEditState {
 
 function element(overrides: Partial<Parameters<typeof TodoDetail>[0]> = {}) {
   return (
-    <TodoDetail
-      todo={todo()}
-      onBack={vi.fn()}
-      titleOf={() => undefined}
-      lockOwnerLabel={undefined}
-      busy={false}
-      error={undefined}
-      onComplete={vi.fn()}
-      onCopyLink={vi.fn()}
-      onComment={vi.fn()}
-      onStartEdit={vi.fn()}
-      scratchpads={[]}
-      edit={null}
-      {...overrides}
-    />
+    <TooltipProvider delayDuration={0}>
+      <TodoDetail
+        todo={todo()}
+        onBack={vi.fn()}
+        titleOf={() => undefined}
+        lockOwnerLabel={undefined}
+        busy={false}
+        error={undefined}
+        onComplete={vi.fn()}
+        onCopyLink={vi.fn()}
+        onComment={vi.fn()}
+        onStartEdit={vi.fn()}
+        scratchpads={[]}
+        edit={null}
+        {...overrides}
+      />
+    </TooltipProvider>
   );
 }
 
@@ -248,7 +251,17 @@ describe("TodoDetail", () => {
     const rail = statusChip().parentElement as HTMLElement;
     expect(rail.textContent).toContain("#1");
     expect(rail.textContent).toContain("1 unmet blocker");
-    expect(within(rail).getByText("infra")).toBeTruthy();
+    expect(statusChip().getAttribute("data-slot")).toBe("badge");
+    expect(within(rail).getByText("1 unmet blocker").getAttribute("data-slot")).toBe("badge");
+    expect(within(rail).getByText("infra").getAttribute("data-slot")).toBe("badge");
+  });
+
+  it("explains the icon-only copy action when it receives focus", async () => {
+    panel();
+
+    fireEvent.focus(screen.getByRole("button", { name: "Copy link to todo" }));
+
+    expect((await screen.findByRole("tooltip")).textContent).toBe("Copy link to todo");
   });
 
   // Below a 15rem container the two secondary actions become menu items. Both forms exist in the
@@ -422,6 +435,7 @@ describe("TodoDetail", () => {
     const unmet = rows.find((row) => row.textContent?.includes("Todo number 3")) as HTMLElement;
 
     expect(within(met).getByText("done")).toBeTruthy();
+    expect(within(met).getByText("Todo number 2").className).not.toContain("line-through");
     expect(within(unmet).getByText("open")).toBeTruthy();
     expect(screen.getByText("1 unmet blocker")).toBeTruthy();
   });

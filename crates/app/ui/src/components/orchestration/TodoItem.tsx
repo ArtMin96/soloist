@@ -1,6 +1,8 @@
 import { Lock } from "lucide-react";
 import { TodoRowSummary } from "@/components/orchestration/TodoRowSummary";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { TodoView } from "@/domain";
 
 interface TodoItemProps {
@@ -21,50 +23,50 @@ interface TodoItemProps {
 // competing with it, and because the whole card is then one target worth aiming at.
 export function TodoItem({ todo, onOpen, lockOwnerLabel, onOpenAgent }: TodoItemProps) {
   const done = todo.doc.status === "done";
+  const agentLabel = lockOwnerLabel ?? `#${todo.locked_by}`;
+
+  const agentControl = todo.locked_by != null && (
+    <Button
+      data-todo-agent
+      data-process-id={todo.locked_by}
+      variant="ghost"
+      size="sm"
+      aria-label={`Open ${agentLabel} terminal`}
+      disabled={onOpenAgent == null}
+      onClick={() => onOpenAgent?.(todo.locked_by as number)}
+      className="m-1 max-w-[45%] min-w-0 shrink-0"
+    >
+      <Lock aria-hidden data-icon="inline-start" />
+      <span data-todo-agent-label className="min-w-0 truncate">
+        {agentLabel}
+      </span>
+    </Button>
+  );
 
   return (
-    // The card lifts to the next surface step on hover from anywhere in it, so it reads as one
-    // object rather than as a row that happens to have a clickable region. Its two lines sit closer
-    // to each other than one card sits to the next, which is what makes a card read as one thing.
-    //
-    // The edge is a transparency of the ink, not `--border`: that token resolves close to the pane
-    // in both themes (1.31:1 light, 1.44:1 dark), so a card drawn with it reads in neither, and no
-    // fill substitutes for it — any tint strong enough to read as an edge reads as a selected row.
-    // The alpha is per-theme because one value cannot clear 3:1 on both grounds: ink on a near-white
-    // pane needs roughly half again the opacity that ink on a near-black one does.
-    //
-    // Hover is carried by the border alone — the rest-to-hover fill step is worth only 1.05:1 — so
-    // the two alphas have to stay far apart or the state change is imperceptible.
-    //
-    // The resting alphas are a ceiling, not a floor. At 45% the outline already matches the status
-    // chips' own outlines for weight; raising it puts the card's structure above the content it
-    // frames. The gap between cards is what does the grouping, so a stronger edge buys contrast the
-    // boundary does not need.
-    <div className="flex items-center gap-1 rounded-lg border border-foreground/45 bg-muted p-1 transition-colors duration-[var(--dur-fast)] hover:border-foreground/60 dark:border-foreground/32 dark:hover:border-foreground/45">
+    <Card data-todo-card size="sm" className="w-full gap-0 rounded-lg py-0">
       {/* The card's own button and the agent control are siblings, not nested — a lock never buries
           an interactive control inside another one, so each is its own tab stop. */}
-      <button
-        type="button"
-        data-todo-trigger
-        onClick={onOpen}
-        className="flex min-w-0 flex-1 flex-col gap-1 overflow-hidden rounded-md px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-      >
-        <TodoRowSummary todo={todo} done={done} />
-      </button>
-      {todo.locked_by != null && (
+      <CardContent className="flex items-stretch gap-0 p-0">
         <Button
-          data-todo-agent
-          data-process-id={todo.locked_by}
+          type="button"
+          data-todo-trigger
           variant="ghost"
-          size="sm"
-          disabled={onOpenAgent == null}
-          onClick={() => onOpenAgent?.(todo.locked_by as number)}
-          className="shrink-0 gap-1"
+          onClick={onOpen}
+          className="h-auto min-w-0 flex-1 flex-col items-stretch gap-1.5 overflow-hidden rounded-none px-2 py-1.5 text-left whitespace-normal active:not-aria-[haspopup]:scale-100 focus-visible:ring-inset"
         >
-          <Lock aria-hidden />
-          {lockOwnerLabel ?? `#${todo.locked_by}`}
+          <TodoRowSummary todo={todo} done={done} />
         </Button>
-      )}
-    </div>
+        {todo.locked_by != null &&
+          (onOpenAgent ? (
+            <Tooltip>
+              <TooltipTrigger asChild>{agentControl}</TooltipTrigger>
+              <TooltipContent>Open {agentLabel} terminal</TooltipContent>
+            </Tooltip>
+          ) : (
+            agentControl
+          ))}
+      </CardContent>
+    </Card>
   );
 }

@@ -6,8 +6,6 @@ import { StatusLetter } from "@/components/git/StatusLetter";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TreeItemLabel } from "@/components/ui/tree";
-import { CHANGE } from "@/lib/git";
-import { cn } from "@/lib/utils";
 import type { Tree } from "@/store/git/tree";
 import type { FileChange } from "@/domain";
 
@@ -66,15 +64,7 @@ export function ChangesTree({
         const change = byPath.get(node.path);
         return (
           <>
-            {/* Only the file itself is struck through: a folder holding a deleted file is still
-                there, and striking it would say otherwise. */}
-            <TreeItemLabel
-              className={cn(
-                !node.folder && node.change !== null && CHANGE[node.change].gone && "line-through",
-              )}
-            >
-              {node.name}
-            </TreeItemLabel>
+            <TreeItemLabel>{node.name}</TreeItemLabel>
             <div className="sticky end-0 z-10 ms-auto flex shrink-0 items-center gap-0.5 bg-inherit pe-2 ps-2">
               {actions !== null && change !== undefined && actions.discardable.has(node.path) && (
                 <Tooltip>
