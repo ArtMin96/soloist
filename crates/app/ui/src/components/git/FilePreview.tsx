@@ -53,18 +53,23 @@ function useHighlighted(
   language: string | null,
   theme: AppliedTheme,
 ): string | null {
-  const [ready, setReady] = useState(false);
+  // What `ensureHighlighting` last resolved, so `ready` below reads false again the instant
+  // `language`/`theme` move past it, rather than staying stuck on a stale grammar's answer.
+  const [loaded, setLoaded] = useState<{ language: string | null; theme: AppliedTheme } | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
-    setReady(false);
-    void ensureHighlighting(language, theme).then((loaded) => {
-      if (!cancelled) setReady(loaded);
+    void ensureHighlighting(language, theme).then((ok) => {
+      if (!cancelled && ok) setLoaded({ language, theme });
     });
     return () => {
       cancelled = true;
     };
   }, [language, theme]);
+
+  const ready = loaded !== null && loaded.language === language && loaded.theme === theme;
 
   return useMemo(() => {
     if (!ready || text === null || language === null) return null;

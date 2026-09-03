@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { DiagramPanel } from "@/components/orchestration/DiagramPanel";
 import { MessagesPanel } from "@/components/orchestration/MessagesPanel";
 import { OrchestrationTree } from "@/components/orchestration/OrchestrationTree";
@@ -45,10 +45,14 @@ export function OrchestrationPane({
   const [view, setView] = useState<View>("agents");
 
   // Cross-surface navigation's inbound half: a focus target switches the pane to its view. The
-  // target row's own expand-and-focus is the board/panel's job, keyed off the same nonce.
-  useEffect(() => {
+  // target row's own expand-and-focus is the board/panel's job, keyed off the same nonce. Tracked
+  // against `focus`'s own identity rather than an effect so the switch lands the same render the
+  // navigation arrives in.
+  const [syncedFocus, setSyncedFocus] = useState(focus);
+  if (syncedFocus !== focus) {
+    setSyncedFocus(focus);
     if (focus != null) setView(focus.view);
-  }, [focus]);
+  }
 
   return (
     <section className="flex h-full min-w-0 flex-col bg-background">

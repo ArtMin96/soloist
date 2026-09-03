@@ -32,10 +32,14 @@ export function useTerminalHotkeys(options: TerminalHotkeysOptions): void {
   const { appearance, setAppearance } = useAppearance();
 
   const bindingsRef = useRef(bindings);
-  bindingsRef.current = bindings;
+  useEffect(() => {
+    bindingsRef.current = bindings;
+  }, [bindings]);
 
   const ctx = useRef({} as LiveContext);
-  ctx.current = { ...options, appearance, setAppearance };
+  useEffect(() => {
+    ctx.current = { ...options, appearance, setAppearance };
+  }, [options, appearance, setAppearance]);
 
   useEffect(() => {
     const el = containerRef.current;

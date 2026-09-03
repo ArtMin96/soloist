@@ -186,12 +186,16 @@ function CountdownCell({ timer }: { timer: TimerView }) {
   );
   const rafRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    if (timer.status === "paused") {
-      setDisplay(formatPausedRemaining(timer.paused_remaining_millis ?? 0));
-      return;
-    }
+  // The paused text is pure, derived straight from props -- adjusted here during render rather than
+  // in an effect, so a pause (or its frozen remaining time changing) never paints the running
+  // countdown's last value for even a frame.
+  if (timer.status === "paused") {
+    const paused = formatPausedRemaining(timer.paused_remaining_millis ?? 0);
+    if (display !== paused) setDisplay(paused);
+  }
 
+  useEffect(() => {
+    if (timer.status === "paused") return;
     const tick = () => {
       const remaining = timer.deadline_unix_millis - Date.now();
       setDisplay(formatCountdown(remaining));
@@ -203,7 +207,7 @@ function CountdownCell({ timer }: { timer: TimerView }) {
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
-  }, [timer.deadline_unix_millis, timer.status, timer.paused_remaining_millis]);
+  }, [timer.deadline_unix_millis, timer.status]);
 
   return (
     <span

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { useLatestRef } from "@/store/useLatestRef";
 
 // The most terminals kept alive at once. Enough that switching between recently-viewed processes
 // is instant (each keeps its xterm + live PTY stream mounted), but bounded well under WebKitGTK's
@@ -38,12 +39,12 @@ export function useTerminalPool(
   const [pool, setPool] = useState<number[]>([]);
   // Depend on the *membership* of the process set (its ordered ids joined), not the array identity,
   // so a fresh `existingIds` array with the same members does not re-run the effect. The latest
-  // array is read from a ref inside the effect so it is not itself a dependency.
+  // array is read from a stable-identity ref (`useLatestRef`) inside the effect, so listing it below
+  // does not change when the effect fires.
   const existingKey = existingIds.join(",");
-  const existingRef = useRef(existingIds);
-  existingRef.current = existingIds;
+  const existingRef = useLatestRef(existingIds);
   useEffect(() => {
     setPool((prev) => nextPool(prev, selectedId, existingRef.current, cap));
-  }, [selectedId, existingKey, cap]);
+  }, [selectedId, existingKey, cap, existingRef]);
   return pool;
 }

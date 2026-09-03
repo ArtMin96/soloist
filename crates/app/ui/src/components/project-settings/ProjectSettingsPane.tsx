@@ -82,20 +82,25 @@ export function ProjectSettingsPane({ project }: { project: ProjectView }) {
   // Runs the next queued write, if any; otherwise the queue has drained and the page is refreshed
   // once. Chained onto every write's settlement (success or failure) so at most one write is ever
   // in flight -- a reload can then never land mid-batch and hand a later write a stale merge base.
-  const drain = useCallback(() => {
-    const state = writeQueue.current;
-    const next = state.queue.shift();
-    if (!next) {
-      state.inFlight = false;
-      void reload();
-      return;
-    }
-    state.inFlight = true;
-    void next
-      .run()
-      .catch((e) => setError(String(e)))
-      .then(drain);
-  }, [reload]);
+  // Named so the recursive call below binds to the function's own name rather than the outer
+  // `const drain`, which is still being assigned at that point.
+  const drain = useCallback(
+    function drainQueue() {
+      const state = writeQueue.current;
+      const next = state.queue.shift();
+      if (!next) {
+        state.inFlight = false;
+        void reload();
+        return;
+      }
+      state.inFlight = true;
+      void next
+        .run()
+        .catch((e) => setError(String(e)))
+        .then(drainQueue);
+    },
+    [reload],
+  );
 
   // Run a write, coalescing it with any not-yet-started write sharing `key` -- most callers pass
   // none, so each of their writes keeps its own slot -- and queuing it behind an in-flight write

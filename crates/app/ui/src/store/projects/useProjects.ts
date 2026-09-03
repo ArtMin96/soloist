@@ -68,11 +68,16 @@ export function useProjects(reportError: (reason: unknown) => void): ProjectStor
   // dropped project would sit back in its old place for the round trip; the core still decides
   // the order, this only spares the user watching it be decided.
   const [arranged, setArranged] = useState<ProjectView[] | null>(null);
+  // Any fresh snapshot is the authoritative order, including the one this arrangement caused —
+  // adjusted directly during render (react.dev/reference/react/useState
+  // #storing-information-from-previous-renders) rather than a tick later once an effect runs.
+  const [reconciledFor, setReconciledFor] = useState(value);
+  if (value !== reconciledFor) {
+    setReconciledFor(value);
+    setArranged(null);
+  }
   // Memoized: an empty list rebuilt each render would churn every consumer that depends on it.
   const projects = useMemo(() => arranged ?? value ?? [], [arranged, value]);
-
-  // Any fresh snapshot is the authoritative order, including the one this arrangement caused.
-  useEffect(() => setArranged(null), [value]);
 
   useEffect(() => {
     let cancelled = false;

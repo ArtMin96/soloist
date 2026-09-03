@@ -52,7 +52,11 @@ export function SegmentedControl<T extends string>({
   }, [value, options, itemRefs]);
 
   useEffect(() => {
-    if (thumb) setAnimated(true);
+    if (!thumb) return;
+    // Waits a frame so the thumb's first measured position paints before the transition turns on
+    // -- otherwise that first paint would itself glide in from zero.
+    const frame = requestAnimationFrame(() => setAnimated(true));
+    return () => cancelAnimationFrame(frame);
   }, [thumb]);
 
   return (

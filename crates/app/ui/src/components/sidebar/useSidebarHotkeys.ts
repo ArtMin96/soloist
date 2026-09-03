@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import {
   findSelectedTree,
   firstOfKind,
@@ -25,10 +25,14 @@ export function useSidebarHotkeys(state: SidebarHotkeysState) {
   const { bindings } = useHotkeys();
 
   const bindingsRef = useRef(bindings);
-  bindingsRef.current = bindings;
+  useEffect(() => {
+    bindingsRef.current = bindings;
+  }, [bindings]);
 
   const stateRef = useRef(state);
-  stateRef.current = state;
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLElement>) {
     if (isEditableTarget(event.target)) return;

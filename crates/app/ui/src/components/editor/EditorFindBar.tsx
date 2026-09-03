@@ -17,26 +17,16 @@ interface EditorFindBarProps {
 // even while the note is edited behind the bar.
 export function EditorFindBar({ editor, onClose }: EditorFindBarProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState({ total: 0, currentIndex: 0 });
-
-  // Seed from the current selection so "find what I highlighted" is one keystroke, then focus and
-  // select the input. Runs once on open; later edits arrive through the transaction subscription.
-  useEffect(() => {
+  const [query, setQuery] = useState(() => {
     const { from, to } = editor.state.selection;
     const selected = from < to ? editor.state.doc.textBetween(from, to, " ") : "";
-    const seed = selected.includes("\n") ? "" : selected.trim();
-    if (seed) {
-      setQuery(seed);
-      setSearchQuery(editor.view, seed);
-    }
-    setStatus(getSearchStatus(editor.state));
-    inputRef.current?.focus();
-    inputRef.current?.select();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    return selected.includes("\n") ? "" : selected.trim();
+  });
+  const [status, setStatus] = useState({ total: 0, currentIndex: 0 });
 
-  // The plugin recomputes on every doc edit and on every query/step; mirror its status from one place.
+  // The plugin recomputes on every doc edit and on every query/step; mirror its status from one
+  // place. Subscribed before the seed below dispatches its own transaction, so that first dispatch
+  // is mirrored the same way as every later one rather than needing a second read of its own.
   useEffect(() => {
     const sync = () => setStatus(getSearchStatus(editor.state));
     editor.on("transaction", sync);
@@ -44,6 +34,16 @@ export function EditorFindBar({ editor, onClose }: EditorFindBarProps) {
       editor.off("transaction", sync);
     };
   }, [editor]);
+
+  // Push the seeded query into the always-present search plugin so "find what I highlighted" is one
+  // keystroke, then focus and select the input. Runs once on open; later edits arrive through the
+  // transaction subscription above.
+  useEffect(() => {
+    if (query) setSearchQuery(editor.view, query);
+    inputRef.current?.focus();
+    inputRef.current?.select();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function runQuery(next: string) {
     setQuery(next);
