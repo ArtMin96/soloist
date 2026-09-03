@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { TodoBoard } from "@/components/orchestration/TodoBoard";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { UNLINKED_GROUP_LABEL } from "@/store/todoGrouping";
 import type { TodoActionsStore } from "@/store/useTodoActions";
 import type { TodoEditorStore } from "@/store/useTodoEditor";
@@ -109,9 +110,14 @@ const todo = (id: number, title: string, scratchpad: ScratchpadRef | null): Todo
 
 const todos = [todo(1, "Ship the release", plan), todo(2, "Triage inbox", null)];
 
+// The detail panel's Copy link and overflow controls are Tooltip triggers, which need a provider
+// ancestor — supplied here rather than by the board itself, since the app supplies one once at its
+// root and the board is never mounted without it in production.
 function board(rows: TodoView[] = todos, overrides: Partial<Parameters<typeof TodoBoard>[0]> = {}) {
   return render(
-    <TodoBoard project={1} todos={rows} agents={[]} scratchpads={[pad]} {...overrides} />,
+    <TooltipProvider>
+      <TodoBoard project={1} todos={rows} agents={[]} scratchpads={[pad]} {...overrides} />
+    </TooltipProvider>,
   );
 }
 
@@ -120,7 +126,11 @@ function rerenderBoard(
   render: (ui: React.ReactElement) => void,
   props: Partial<Parameters<typeof TodoBoard>[0]>,
 ) {
-  render(<TodoBoard project={1} todos={todos} agents={[]} scratchpads={[pad]} {...props} />);
+  render(
+    <TooltipProvider>
+      <TodoBoard project={1} todos={todos} agents={[]} scratchpads={[pad]} {...props} />
+    </TooltipProvider>,
+  );
 }
 
 /** The board's group headers, in render order, read off the handle that carries the label itself. */
@@ -413,5 +423,23 @@ describe("TodoBoard", () => {
     expect(within(panel("detail")).getByRole("heading", { name: "Ship the release" })).toBeTruthy();
     expect(searchBox().value).toBe("triage");
     expect(within(panel("list")).queryByText("Ship the release")).toBeNull();
+  });
+
+  it("keeps the search box live and settles the filtered list to the matching row, even over a large board", () => {
+    // Filtering runs off a deferred copy of the toolbar's filter (see TodoBoard.tsx), so the search
+    // box itself must never wait on it — this is the surface that would visibly lag if the input
+    // were bound to anything but the live keystroke.
+    const many = Array.from({ length: 3000 }, (_, i) => todo(i, `Task number ${i}`, null));
+    board(many);
+
+    fireEvent.change(searchBox(), { target: { value: "number 1234" } });
+
+    // The typed text lands synchronously, regardless of how large the board behind it is.
+    expect(searchBox().value).toBe("number 1234");
+    // The deferred derivation settles to exactly the matching row — never the unfiltered 3000, and
+    // never a mix of the two.
+    const rows = document.querySelectorAll("[data-todo-id]");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].getAttribute("data-todo-id")).toBe("1234");
   });
 });

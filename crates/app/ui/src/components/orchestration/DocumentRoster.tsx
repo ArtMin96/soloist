@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useDeferredValue, useMemo, useState, type ReactNode } from "react";
 import { ArrowDownUp, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -74,8 +74,14 @@ export function DocumentRoster<Row extends DocumentSummaryRow, Sort extends stri
     return [...distinct].sort();
   }, [items]);
 
+  // The search box stays bound to the live `query` so typing never lags; the filtered rows (and
+  // whether the empty state reads as "no matches" or "nothing yet") are what's allowed to lag one
+  // frame behind it, kept off the deferred value together so they never disagree about which query
+  // produced them.
+  const deferredQuery = useDeferredValue(query);
+
   const visible = useMemo(() => {
-    const needle = query.trim().toLowerCase();
+    const needle = deferredQuery.trim().toLowerCase();
     const matched = items.filter((item) => {
       if (tag !== null && !item.tags.includes(tag)) return false;
       if (needle === "") return true;
@@ -88,11 +94,11 @@ export function DocumentRoster<Row extends DocumentSummaryRow, Sort extends stri
       );
     });
     return sortItems(matched, sort);
-  }, [items, query, tag, sort, sortItems]);
+  }, [items, deferredQuery, tag, sort, sortItems]);
 
   const active = visible.filter((item) => !item.archived);
   const archived = visible.filter((item) => item.archived);
-  const filtering = query.trim() !== "" || tag !== null;
+  const filtering = deferredQuery.trim() !== "" || tag !== null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { TodoCreateForm } from "@/components/orchestration/TodoCreateForm";
 import { TodoDetail, type TodoEditState } from "@/components/orchestration/TodoDetail";
 import { TodoGroup } from "@/components/orchestration/TodoGroup";
@@ -103,9 +103,15 @@ export function TodoBoard({
   const [collapsed, setCollapsed] = useCollapseState();
 
   const tags = useMemo(() => todoTags(todos), [todos]);
-  const visible = useMemo(() => filterTodos(todos, filter), [todos, filter]);
+  // Filtering is the toolbar's own render — the search box, status select and tag chips must track
+  // every keystroke and click exactly, so they stay bound to the live `filter`. Everything downstream
+  // of it (the filtered rows, their grouping, and whether to group at all) is what can lag: deferring
+  // the filter, not just `visible`, keeps those three in step with each other so a filtered flat list
+  // and a "no matches" empty state never render for a beat over rows still keyed to the old filter.
+  const deferredFilter = useDeferredValue(filter);
+  const visible = useMemo(() => filterTodos(todos, deferredFilter), [todos, deferredFilter]);
   const groups = useMemo(() => groupTodosByScratchpad(visible), [visible]);
-  const grouped = view === "grouped" && !isFiltering(filter);
+  const grouped = view === "grouped" && !isFiltering(deferredFilter);
 
   const titleOf = (id: number) => todos.find((todo) => todo.id === id)?.doc.title;
   const labelOf = (id: number) => agents.find((agent) => agent.id === id)?.label;
@@ -161,11 +167,12 @@ export function TodoBoard({
   // is nothing left to show or edit, so the board drops straight back to the list rather than holding
   // a panel over a todo that no longer exists. Only while the panel is showing: one already sliding
   // out is cleared by `onSettled` a beat later, and cutting it short would blank it mid-movement.
-  useEffect(() => {
-    if (detail == null || !detail.showing || detailTodo != null) return;
+  // Adjusted here during render, keyed off `todos` itself changing, so the drop lands the same
+  // render the todo disappears in rather than painting a dead panel for a frame first.
+  if (detail != null && detail.showing && detailTodo == null) {
     setDetail(null);
     if (editor.mode === "edit" && editor.editingId === detail.id) editor.close();
-  }, [detail, detailTodo, editor]);
+  }
 
   // Whether the navigation target has actually arrived in the live snapshot. Coming from a freshly
   // mounted pane, `focusNonce` can be set before the first snapshot lands — `targetPresent` gates
@@ -179,7 +186,14 @@ export function TodoBoard({
   useEffect(() => {
     if (focusId == null || focusNonce == null || !targetPresent) return;
     if (navigatedNonces.get(project) === focusNonce) return;
+    // Marks the nonce spent before acting on it: a persistent module-level Map, not render state —
+    // render must stay replayable (Strict Mode, discarded renders), and mutating it there would
+    // mark a navigation spent that never actually happened. `openDetail` in turn writes
+    // `pendingFocusRef.current`, a ref write that render itself may not make either — so the panel
+    // open (and the ref-driven focus move that depends on it) genuinely belongs here, once, in
+    // response to this external navigation event.
     navigatedNonces.set(project, focusNonce);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- opens in response to an external navigation event (see above); the ref write it makes cannot happen during render.
     openDetail(focusId);
     // Only the navigation's own trigger conditions belong here — `openDetail` closes over the live
     // editor, a fresh object every render, which would re-fire this on every one.
@@ -249,7 +263,7 @@ export function TodoBoard({
         {visible.length === 0 ? (
           <Empty>
             <EmptyHeader>
-              {isFiltering(filter) ? (
+              {isFiltering(deferredFilter) ? (
                 <EmptyDescription>No todos match your search.</EmptyDescription>
               ) : (
                 <>
