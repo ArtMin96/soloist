@@ -8,7 +8,7 @@ import { shrinkWindowToMinimum } from "../../src/harness/window.js";
 import { launchAgent } from "../../src/flows/launch.js";
 import { openProject } from "../../src/flows/openProject.js";
 import { orchestrationPane } from "../../src/screens/OrchestrationPane.js";
-import { scratchpadPanel } from "../../src/screens/ScratchpadPanel.js";
+import { scratchpadBoard } from "../../src/screens/ScratchpadBoard.js";
 import { sidebar } from "../../src/screens/Sidebar.js";
 import { terminalPane } from "../../src/screens/TerminalPane.js";
 import { todoBoard, type FitReading } from "../../src/screens/TodoBoard.js";
@@ -140,14 +140,16 @@ describe("the todo workspace", () => {
     expect(landed.backFocused).toBe(true);
   });
 
-  it("returns from a this-session item to that scratchpad, selected and focused", async () => {
+  it("returns from a this-session item to that scratchpad, open and focused", async () => {
     await sidebar.select(LEAD);
     await terminalPane.openSessionScratchpad(COORDINATION.scratchpad);
-    await scratchpadPanel.waitForRoster();
-    expect(await scratchpadPanel.waitForFocused(COORDINATION.scratchpad)).toEqual({
-      name: COORDINATION.scratchpad,
-      selected: true,
-    });
+
+    // The inbound half lands on the document itself, not on a board the reader then has to search:
+    // the detail panel opens on it whatever the list's filter and sort happen to be, and focus goes
+    // with it rather than staying behind in the panel that just went inert — the same shape the
+    // to-do half of this walk asserts.
+    const landed = await scratchpadBoard.waitForDetail(COORDINATION.scratchpad);
+    expect(landed.backFocused).toBe(true);
   });
 
   it("fits the board with no horizontal overflow at the app's minimum window width", async () => {

@@ -4,22 +4,24 @@ import { WAIT } from "../harness/waits.js";
 import { waitUntilOr } from "../harness/waitUntilOr.js";
 
 // The to-do board: the project's shared work items as a list of cards, and the detail panel one
-// card hands the whole pane over to. Selectors live only here, addressed by the row's `data-todo-*`
-// handles rather than DOM position — the card's own button and, on a locked row, the agent control
-// are siblings, so neither structure nor styling can move a handle out from under this file.
+// card hands the whole pane over to. Selectors live only here, addressed by each todo's own
+// `data-todo-*` handles and by the board handles it shares with the scratchpad board
+// (`data-panel-route`, `data-card-trigger`, `data-detail-back`, `data-board-toolbar`) rather than
+// by DOM position — the card's own button and, on a locked row, the agent control are siblings, so
+// neither structure nor styling can move a handle out from under this file.
 //
 // A row is found by the exact text of its title (`data-todo-title`), the same justified structural
 // handle the sidebar uses for a process row, and then addressed by the id the core gave it.
 //
 // **Both panels are mounted at all times** — the one that is not showing is translated off the
 // track and made `inert`, never unmounted — so the existence of a panel proves nothing about which
-// one the user is on. `data-todo-route` on the viewport is the only honest read of that, and every
+// one the user is on. `data-panel-route` on the viewport is the only honest read of that, and every
 // detail handle here is scoped under `[data-todo-detail]`, because `inert` does not remove a node
 // from `querySelectorAll` and the row and the detail deliberately carry some of the same handles
 // (`data-todo-status`, `data-todo-agent`).
 
 /** The attribute the board's transition viewport names the panel currently on screen with. */
-const ROUTE_ATTR = "data-todo-route";
+const ROUTE_ATTR = "data-panel-route";
 /**
  * The attribute the detail panel's root names its todo with. Unlike the panel slot it sits in, the
  * root exists only while a todo is open, and it names *which* — so it settles both questions the
@@ -28,7 +30,15 @@ const ROUTE_ATTR = "data-todo-route";
 const DETAIL_ATTR = "data-todo-detail";
 const DETAIL = `[${DETAIL_ATTR}]`;
 /** The detail's return control — and where the board parks focus when it opens the panel. */
-const BACK = "[data-todo-back]";
+const BACK = "[data-detail-back]";
+/**
+ * A region of the open detail still standing in for content it does not have yet. Prose here is
+ * mounted a pass after the click and draws a stand-in until its renderer has seeded, and every
+ * stand-in marks its box busy — labelled or not, since a thread of ten comment bodies must not
+ * announce ten waits — so the absence of one is the panel's own statement that what is on screen is
+ * the content rather than a placeholder for it.
+ */
+const DETAIL_BUSY = `${DETAIL} [aria-busy="true"]`;
 
 /** Which of the board's two panels the user is on. */
 type TodoRoute = "list" | "detail";
@@ -388,7 +398,7 @@ export const todoBoard = {
           scroller = scroller.parentElement;
         }
         return [
-          fit("toolbar", document.querySelector("[data-todo-toolbar]")),
+          fit("toolbar", document.querySelector("[data-board-toolbar]")),
           fit("rows", scroller),
         ];
       }),
@@ -445,11 +455,22 @@ export const todoBoard = {
   },
 
   /**
-   * Opens the todo and returns everything its detail panel renders — used to read a comment and its
-   * author, which the row never showed and the panel now owns.
+   * Opens the todo and returns everything its detail panel renders, once it has finished rendering
+   * it — used to read a comment and its author, which the row never showed and the panel now owns.
+   *
+   * The settle is the point: a single read lands while the body and each comment are still their
+   * stand-ins, and reports the words "Loading …" where the content will be. That was a latent race
+   * the walk had been winning until the renderer began deferring a pass.
    */
   async detailText(title: string): Promise<string> {
     await this.open(title);
+    await waitUntilOr(
+      async () => !(await $(DETAIL_BUSY).isExisting()),
+      async () =>
+        `the detail panel for "${title}" never finished rendering; last read: ${JSON.stringify(
+          await $(DETAIL).getText(),
+        )}`,
+    );
     return $(DETAIL).getText();
   },
 
@@ -490,7 +511,7 @@ export const todoBoard = {
 
   /** The card's own button — the whole row, which hands the pane to this todo's detail panel. */
   async trigger(title: string) {
-    return (await this.rowElement(title)).$("[data-todo-trigger]");
+    return (await this.rowElement(title)).$("[data-card-trigger]");
   },
 
   /**

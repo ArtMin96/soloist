@@ -310,6 +310,61 @@ clickable after 10000ms`) and three tests cascaded — not because of the produc
 row, the same discipline `open()` already had; reads need no such thing, since the off-screen panel stays mounted
 and live. Re-running the later mutations confirmed the cascade was gone: each reddened only its own assertions.
 
+**Reconciled again when the scratchpad surface became the same board.** The roster listbox and the editor pane
+beside it were replaced by the to-do board's twin — a toolbar, cards, and a detail panel that slides in — so
+`ScratchpadPanel` is `ScratchpadBoard`, shaped like `TodoBoard` and taking the same one-pass snapshot for the same
+reason. Both boards wear one kit now, so four of `TodoBoard`'s handles were renamed with it (`data-panel-route`,
+`data-detail-back`, `data-card-trigger`, `data-board-toolbar`); its behavioural contract did not move. Three
+things are worth keeping:
+
+- **The detail panel opens in *reading*, and that moved a step of the conflict walk.** A document merely being
+  read follows the revision the board sees — the pane re-reads it under the reader, so a note an agent is writing
+  into stays current — which makes "open it and wait" exactly how *not* to hold a stale revision. The editor is
+  therefore started before the lead's concurrent write rather than after it, since only an open editor holds the
+  revision the next save is guarded by. No assertion changed, and the first mutation below still pins the one
+  that matters.
+- **Reading mounts the same editor as writing**, held read-only, so `[data-editor="rich-text"]` is on screen in
+  both modes and waiting for it would have let `startEdit` return before anything was editable. It waits on the
+  Done control instead, which exists only while a document is being written to.
+- **A board's landmark has to name its own subject.** `[data-board-toolbar]` and `[data-panel-route]` belong to
+  both boards now, so `waitForBoard` waits on the search field's accessible name (`aria/Search scratchpads`,
+  webdriver.io's ✅ accessible-name strategy). A shared structural handle would settle on whichever board happened
+  to be up and report a view switch that had not happened.
+
+**And it found a product regression the boards' own tests could not see** — the same shape as the last one, one
+surface up. `OrchestrationPane` switches to the view an inbound activation names, and that switch had moved from
+an effect to a render-time state adjustment (`ae4c570`, the React-Compiler pass). The two are not equivalent at
+mount: an effect runs after the first commit, while `useState(focus)` seeds the guard *with the arriving
+activation*, so the adjustment's `if` is false on the one render that needed it. The pane an inbound navigation
+lands in is always a fresh mount — `openOrchestrationItem` deselects the process and names the target in a single
+commit, unmounting the terminal and mounting the pane together — so **both** halves of the session bar put the
+reader on the agents tree instead of the item they activated. Two of this walk's assertions were red for it before
+any part of the reconciliation was in question, one of them in a test the reconciliation never touched. Fixed by
+seeding the view from the activation (`useState<View>(focus?.view ?? DEFAULT_VIEW)`), which answers the mount case
+with no effect and leaves the render-time adjustment to handle a later activation. `OrchestrationPane.test.tsx`
+had no `focus` test at all; it now covers the mount case, watched red against the unfixed pane
+(`expected [] to have a length of 1`, the pane rendering "No agents in this project yet") and green after.
+
+| Mutation | Expected | Observed |
+|----------|----------|----------|
+| Drop `onOpen` from `ScratchpadBoard`'s `useMasterDetail` options — the detail panel opens without reading the document | only the scratchpad-conflict assertion fails | exactly that: `element ("aria/Edit") still not clickable after 30000ms` — the header's Edit control is disabled until the body read lands, so an unread document can never be edited. `coordination-panels`' other two and **all 19 other spec files** passed, `todo-workspace` 9/9 among them: its scratchpad navigation asserts the panel opened and where focus went, neither of which needs the document |
+| Delete the `pendingFocusRef.current = { panel: "detail", … }` write in `useMasterDetail.open` — opening a panel no longer moves focus into it | only the `backFocused` assertions fail | exactly that, and now **three** of them rather than the two the to-do board alone had: `Expected: true, Received: false` in "hands the pane to a card's detail panel…", "returns from a current-work item to that todo…" and "returns from a this-session item to that scratchpad…". Both boards share the hook, so one deleted line reddens both surfaces' inbound focus and nothing else — `todo-workspace`'s other six and all 19 other spec files passed |
+
+Both mutations were restored by byte copy and verified with `sha256sum` against the pre-mutation digest, and each
+restore re-checks the file still matches the *mutated* hash first, so a concurrent edit is refused rather than
+clobbered. `git checkout --` is not usable here: neither file is committed, so it would revert to HEAD and destroy
+the refactor.
+
+**Harness finding (fixed here, not a product defect): a read that never waited for the panel to finish rendering.**
+`todoBoard.detailText` took one `getText()` straight after the click, and the comment walk had been winning that
+race by luck. It stopped winning once rendered Markdown began mounting a pass after the click and standing in for
+itself until its renderer seeds — the read then returned
+`…DescriptionLoading Review the changelog bodyComments1CCodex`, with the author present and the body still a
+placeholder. The remedy is the app's own accessibility contract rather than a timeout: every stand-in marks its box
+`aria-busy`, labelled or not (a thread of ten comment bodies must not announce ten waits), so the read now settles
+on there being no `[aria-busy="true"]` left inside `[data-todo-detail]` and only then reads. That is a statement the
+panel makes about itself, so it cannot drift out of step with however long the prose happens to take.
+
 The addressed-agent-messaging walk (`specs/orchestration/agent-messaging.spec.ts`) reuses the bound lead
 fixture with two spawned fixture workers. Its source proof contrasts the wire default with an explicit
 opt-out: the primary serializes `include_agent_instructions: true`, which the protocol omits on the wire,
