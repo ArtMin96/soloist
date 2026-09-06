@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { DETAIL_MEASURE } from "@/components/orchestration/DetailPaneHeader";
+import { DETAIL_DONE_ATTRIBUTE, DETAIL_MEASURE } from "@/components/common/DetailPane";
 import { TodoDetail, type TodoEditState } from "@/components/orchestration/TodoDetail";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TODO_STATUS, TODO_STATUS_ORDER, TODO_STATUS_TONE } from "@/lib/todo";
@@ -366,8 +366,8 @@ describe("TodoDetail", () => {
 
     const done = within(header()).getByRole("button", { name: "Done" });
     // Exactly one exit control: the editor no longer draws its own.
-    expect(document.querySelectorAll("[data-todo-done]").length).toBe(1);
-    expect(done.getAttribute("data-todo-done")).not.toBeNull();
+    expect(document.querySelectorAll(`[${DETAIL_DONE_ATTRIBUTE}]`).length).toBe(1);
+    expect(done.getAttribute(DETAIL_DONE_ATTRIBUTE)).not.toBeNull();
 
     fireEvent.click(done);
     expect(onDone).toHaveBeenCalledTimes(1);
@@ -376,7 +376,7 @@ describe("TodoDetail", () => {
   it("still reports autosave state while editing", () => {
     panel({ edit: editState() });
 
-    const status = document.querySelector("[data-todo-autosave-status]") as HTMLElement;
+    const status = document.querySelector("[data-autosave-status]") as HTMLElement;
     expect(status).not.toBeNull();
     expect(status.getAttribute("aria-live")).toBe("polite");
   });
@@ -385,7 +385,7 @@ describe("TodoDetail", () => {
     const onBack = vi.fn();
     panel({ edit: editState(), onBack });
 
-    fireEvent.click(document.querySelector("[data-todo-back]") as HTMLElement);
+    fireEvent.click(document.querySelector("[data-detail-back]") as HTMLElement);
 
     expect(onBack).toHaveBeenCalledTimes(1);
   });
@@ -394,7 +394,7 @@ describe("TodoDetail", () => {
     const onBack = vi.fn();
     panel({ onBack });
 
-    const back = document.querySelector("[data-todo-back]") as HTMLButtonElement;
+    const back = document.querySelector("[data-detail-back]") as HTMLButtonElement;
     expect(back.tagName).toBe("BUTTON");
     expect(back.getAttribute("aria-label")).toBe("Back to todos");
 

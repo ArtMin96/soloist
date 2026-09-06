@@ -1,5 +1,5 @@
 import { MessageSquareIcon, ShieldAlertIcon } from "lucide-react";
-import { TagList } from "@/components/orchestration/TagList";
+import { TagList } from "@/components/common/TagList";
 import { Badge } from "@/components/ui/badge";
 import { TODO_STATUS, TODO_STATUS_ICON, TODO_STATUS_TONE, unmetBlockerLabel } from "@/lib/todo";
 import { cn } from "@/lib/utils";

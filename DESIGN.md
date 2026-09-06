@@ -420,6 +420,11 @@ mono UI label or button is terminal cosplay, not hierarchy.
 **R4.8 — Numeric data uses `font-variant-numeric: tabular-nums` and right-aligns in columns** (PIDs,
 ports, durations, metrics) so digits stack for scanning.
 
+**R4.9 — Prose bodies carry no tracking: `letter-spacing: normal`, declared explicitly.** The body
+tracking token is chrome typography; on 13px prose it resolves to −0.078px, an adjustment below one
+device pixel that costs WebKit roughly twice the layout time on a long document. Declare it rather
+than omit it — a prose surface inherits the tracking of whatever panel it is nested in.
+
 ## 5. Layout, density and window
 
 **R5.1 — 4px base unit.** The frontmatter's own spacing scale (`xs 4 / sm 6 / md 8 / lg 12 / xl 16`)

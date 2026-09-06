@@ -1,11 +1,16 @@
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
-interface MarkdownSkeletonProps {
-  /** The Markdown the stand-in holds the place of; its length sets how many lines are drawn. */
-  markdown: string;
-  className?: string;
-}
+type MarkdownSkeletonProps = (
+  | {
+      /** The Markdown the stand-in holds the place of; its length sets how many lines are drawn. */
+      markdown: string;
+    }
+  | {
+      /** For a body not yet read, whose length is therefore unknown: how many lines to hold. */
+      lines: number;
+    }
+) & { className?: string };
 
 /** Characters a prose line carries — the measure the rendered body is capped at. */
 const CHARS_PER_LINE = 72;
@@ -21,13 +26,15 @@ const LAST_LINE_WIDTH = "w-2/5";
 
 /**
  * The stand-in for a Markdown body that has not been rendered yet: bars at the prose's own line
- * pitch, as many as the text is long, so the block occupies the height the words will and the
- * reading position does not move when they arrive.
+ * pitch, as many as the text is long — or as many as a caller holding the place of a body it has
+ * not read yet asks for — so the block occupies the height the words will and the reading position
+ * does not move when they arrive.
  *
  * Purely visual — the wrapper around it owns the busy state and the announcement.
  */
-export function MarkdownSkeleton({ markdown, className }: MarkdownSkeletonProps) {
-  const lines = estimateLineCount(markdown);
+export function MarkdownSkeleton(props: MarkdownSkeletonProps) {
+  const { className } = props;
+  const lines = held("markdown" in props ? estimateLineCount(props.markdown) : props.lines);
 
   return (
     // A bar the height of the text sitting in the gap that completes its line-height: the column's
@@ -47,7 +54,12 @@ export function MarkdownSkeleton({ markdown, className }: MarkdownSkeletonProps)
 function estimateLineCount(markdown: string): number {
   const written = markdown.split("\n").length;
   const wrapped = Math.ceil(markdown.length / CHARS_PER_LINE);
-  return Math.min(Math.max(written, wrapped, MIN_LINES), MAX_LINES);
+  return Math.max(written, wrapped);
+}
+
+/** Held to the block's bounds, whichever side the count came from. */
+function held(lines: number): number {
+  return Math.min(Math.max(lines, MIN_LINES), MAX_LINES);
 }
 
 function lineWidth(index: number, lines: number): string {

@@ -1,7 +1,28 @@
 // @vitest-environment jsdom
+import { useEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { DETAIL_BACK_ATTRIBUTE } from "@/components/common/DetailPane";
 import { SlidingPanels, type SlidingPanel } from "@/components/common/SlidingPanels";
+import { MarkdownView } from "@/components/editor/MarkdownView";
+import { createNavigationLedger, useMasterDetail } from "@/store/useMasterDetail";
+
+// The document renderer needs real layout, so the surface a body would build is stood in for. It
+// reports itself seeded the way the real one does, since when that happens is what decides whether
+// the reader is looking at prose or at a stand-in. What matters here is when it is built, not what
+// it draws.
+vi.mock("@/components/editor/LazyRichTextEditor", () => ({
+  LazyRichTextEditor: ({
+    initialMarkdown,
+    onReady,
+  }: {
+    initialMarkdown: string;
+    onReady?: () => void;
+  }) => {
+    useEffect(() => onReady?.(), [onReady]);
+    return <div data-testid="rich-text">{initialMarkdown}</div>;
+  },
+}));
 
 afterEach(cleanup);
 
@@ -74,5 +95,80 @@ describe("SlidingPanels", () => {
     expect(container.querySelector("[data-panel-route]")!.getAttribute("data-panel-route")).toBe(
       "list",
     );
+  });
+});
+
+const LEDGER = createNavigationLedger();
+const BODIES: Record<number, string> = { 1: "The first note.", 2: "The second note." };
+
+// A board of the shape every consumer builds: the route hook driving the panels, and a document
+// body inside the detail panel. Wired from the real pieces, because the thing under test is what
+// they do together on one open and one Back.
+function Board({ onOpen }: { onOpen: (key: number) => void }) {
+  const route = useMasterDetail<number>({
+    project: 1,
+    ledger: LEDGER,
+    present: () => true,
+    rowTrigger: (key) => `[data-row="${key}"]`,
+    onOpen,
+  });
+
+  return (
+    <SlidingPanels
+      showing={route.showing}
+      onSettled={route.onSettled}
+      list={Object.keys(BODIES).map((key) => (
+        <button key={key} data-row={key} type="button" onClick={() => route.open(Number(key))}>
+          Note {key}
+        </button>
+      ))}
+      detail={
+        route.detailKey == null ? null : (
+          <div>
+            <button {...{ [DETAIL_BACK_ATTRIBUTE]: "" }} type="button" onClick={route.back}>
+              Back
+            </button>
+            <MarkdownView
+              key={route.detailKey}
+              markdown={BODIES[route.detailKey]}
+              ariaLabel="body"
+            />
+          </div>
+        )
+      }
+    />
+  );
+}
+
+describe("SlidingPanels driving a board", () => {
+  it("stands in for the document while moving, and settles once in each direction", () => {
+    const opened = vi.fn();
+    const { container } = render(<Board onOpen={opened} />);
+
+    fireEvent.click(screen.getByText("Note 1"));
+
+    // The panel is on its way in: the reader has the stand-in, and the frames belong to the slide.
+    expect(screen.getByRole("status").getAttribute("aria-busy")).toBe("true");
+    expect(screen.queryByTestId("rich-text")).toBeNull();
+
+    fireEvent.transitionEnd(track(container), { propertyName: "translate" });
+    expect(screen.getByTestId("rich-text").textContent).toBe(BODIES[1]);
+
+    fireEvent.click(screen.getByText("Back"));
+
+    // Still carrying its subject: a panel that blanks on the way out reads as a bug, not a slide.
+    expect(screen.getByTestId("rich-text").textContent).toBe(BODIES[1]);
+    expect(opened).toHaveBeenCalledTimes(1);
+
+    fireEvent.transitionEnd(track(container), { propertyName: "translate" });
+    expect(screen.queryByTestId("rich-text")).toBeNull();
+
+    fireEvent.click(screen.getByText("Note 2"));
+
+    // Every open, not just the first: the stand-in is what the reader sees while the next document
+    // is built, and nothing was re-read to put it there.
+    expect(screen.getByRole("status").getAttribute("aria-busy")).toBe("true");
+    expect(screen.queryByTestId("rich-text")).toBeNull();
+    expect(opened.mock.calls).toEqual([[1], [2]]);
   });
 });

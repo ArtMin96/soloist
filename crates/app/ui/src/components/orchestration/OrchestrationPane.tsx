@@ -4,7 +4,8 @@ import { SkeletonList } from "@/components/common/SkeletonList";
 import { DiagramPanel } from "@/components/orchestration/DiagramPanel";
 import { MessagesPanel } from "@/components/orchestration/MessagesPanel";
 import { OrchestrationTree } from "@/components/orchestration/OrchestrationTree";
-import { ScratchpadPanel } from "@/components/orchestration/ScratchpadPanel";
+import { ScratchpadBoard } from "@/components/orchestration/ScratchpadBoard";
+import { ScratchpadBoardSkeleton } from "@/components/orchestration/ScratchpadBoardSkeleton";
 import { TimersPanel } from "@/components/orchestration/TimersPanel";
 import { TodoBoard } from "@/components/orchestration/TodoBoard";
 import { TodoBoardSkeleton } from "@/components/orchestration/TodoBoardSkeleton";
@@ -36,6 +37,9 @@ const VIEW_OPTIONS: Option<View>[] = (Object.keys(VIEW_LABEL) as View[]).map((va
   label: VIEW_LABEL[value],
 }));
 
+/** The view the pane opens on when no navigation named one: the project's agents. */
+const DEFAULT_VIEW: View = "agents";
+
 /** Stand-in rows a view without a skeleton of its own draws: enough to fill a pane at rest. */
 const VIEW_SKELETON_ROWS = 8;
 
@@ -46,7 +50,7 @@ const GENERIC_SKELETON = <SkeletonList count={VIEW_SKELETON_ROWS} className="p-3
 const VIEW_SKELETON: Record<View, ReactNode> = {
   agents: GENERIC_SKELETON,
   todos: <TodoBoardSkeleton />,
-  scratchpads: GENERIC_SKELETON,
+  scratchpads: <ScratchpadBoardSkeleton />,
   diagrams: GENERIC_SKELETON,
   timers: GENERIC_SKELETON,
   messages: GENERIC_SKELETON,
@@ -68,7 +72,11 @@ export function OrchestrationPane({
   onOpenAgent?: (process: number) => void;
 }) {
   const { snapshot, error, refresh } = useOrchestration(project.id);
-  const [view, setView] = useState<View>("agents");
+  // Seeded from the activation, because the pane the inbound navigation lands in is a fresh one:
+  // opening a session-work item deselects the process and names the target in a single commit, so
+  // the target is already on the props of the pane's very first render. Adjusting after mount is
+  // too late — there is no later render for it to happen in.
+  const [view, setView] = useState<View>(focus?.view ?? DEFAULT_VIEW);
 
   // The switcher is bound to the live view so it moves the instant it is clicked, while the body
   // renders the deferred one — a heavy view mounting can then never hold up the click that asked
@@ -138,7 +146,7 @@ export function OrchestrationPane({
                 />
               )}
               {deferredView === "scratchpads" && (
-                <ScratchpadPanel
+                <ScratchpadBoard
                   project={project.id}
                   scratchpads={model.scratchpads}
                   focusName={focus?.view === "scratchpads" ? focus.name : undefined}

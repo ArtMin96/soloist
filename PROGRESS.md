@@ -9,7 +9,139 @@
 
 ## Current state
 
-> **NEWEST (2026-09-03): PROSE STAND-IN — TODO DETAIL OPENS ON THE CLICK — `Done — pending verify`,
+> **NEWEST (2026-09-06): SCRATCHPAD BOARD ON A SHARED MASTER–DETAIL KIT + AN INBOUND-NAVIGATION
+> REGRESSION FIXED + A DETAIL-OPEN PERF PASS THAT DID NOT FIX THE LAG — UI `Done — pending verify`,
+> perf explicitly unresolved; uncommitted on `feat/todo-workspace-ux` (PR #200) except the e2e
+> reconciliation at `7d960ef`.**
+> The scratchpad workspace was rebuilt as a master–detail board matching the todo workspace, on a
+> shared kit extracted from the todo board so both surfaces run on one implementation. Owner
+> decisions, all confirmed in-session: the detail opens **read-first with an Edit action** rather than
+> straight into the editor; **scratchpads only** this pass, diagrams stay on the old roster for a
+> follow-up; an **inline "New scratchpad" create strip**; and the prose body's letter-spacing dropped,
+> recorded in `DESIGN.md` as **R4.9**.
+>
+> **The shared kit** (all under `crates/app/ui/src`, new unless noted). In `components/common/`:
+> `CollapsibleGroup`, `BoardToolbar`, `BoardSkeleton`, `CardRow` (with `CardRowStandIn`),
+> `DetailPane` (`DetailPaneHeader`, `DetailBackButton`, `DetailNotice`, `DetailBody`, the
+> responsive-shed constants, `DETAIL_BACK_ATTRIBUTE`, `DETAIL_DONE_ATTRIBUTE`) and `DetailActions`;
+> the existing `SlidingPanels` gained exported handle constants and now publishes a settled signal;
+> `TagList` and `TagFilterChips` moved here from `orchestration/`. `store/useMasterDetail.ts` holds
+> the detail route state, focus restore and a per-board nonce ledger via `createNavigationLedger`;
+> `store/boardFilter.ts` holds `matchesSearchAndTag`, `isSearchingOrTagging` and `distinctTags`;
+> `store/panelSettledContext.ts` carries the settled signal; `components/editor/AutosaveStatus.tsx` is
+> the one autosave footer. **Deleted as duplicates or dead:** `TodoPanels.tsx` (a byte-twin of the
+> generic `SlidingPanels` that already existed), `TodoGroup.tsx`, `orchestration/DetailPaneHeader.tsx`,
+> `ScratchpadPanel.tsx` (and its test), `ScratchpadRoster.tsx`, `ScratchpadBody.tsx`.
+>
+> **The scratchpad surface.** `ScratchpadBoard`, `ScratchpadToolbar`, `ScratchpadCard`,
+> `ScratchpadMeta`, `ScratchpadDetail`, `ScratchpadCreateForm`, `ScratchpadBoardSkeleton`, a rewritten
+> `ScratchpadEditor`, and `store/scratchpadFilter.ts`. In the data layer,
+> `useScratchpadEditor.document` is now a `Loadable<ScratchpadView>` so `LoadableRegion` can render a
+> real stand-in: `open` sets loading, `reload` keeps the held value, a landed `save` replaces it.
+> `store/useScratchpadActions.ts` is new. `lib/format.formatUpdatedAt` returns null for
+> `updated_at === 0`, so a document from before that field renders no time rather than 1970.
+> `lib/humanize.distinctHandle` is new.
+>
+> **The todo board adopted the same kit with no behaviour change.** `TodoBoard.tsx` 334 → 245 lines,
+> `TodoDetail.tsx` 447 → 283 (off the over-400 list), new `TodoActions.tsx`, `todoFilter` rebased onto
+> `boardFilter`, and the four autosave footers (todo, scratchpad, diagram, template) now share one
+> `AutosaveStatus`.
+>
+> **Product regression found and fixed, still uncommitted.** `OrchestrationPane` never switched view
+> for an inbound navigation: it seeded `useState<View>("agents")` and switched only when `focus`
+> *changed*, but `openOrchestrationItem` deselects the process and names the target in one commit, so
+> the pane is always a fresh mount and no later render exists for a render-time adjustment.
+> Activating a todo or scratchpad from the terminal session bar landed the reader on the agents tree.
+> Introduced by `ae4c570` (the React Compiler pass), which moved that switch out of a `useEffect`,
+> which does run on mount. Fixed with `useState<View>(focus?.view ?? DEFAULT_VIEW)` plus the pane's
+> first-ever `focus` regression test, observed red first. Left uncommitted because both files also
+> carry this session's scratchpad-board work.
+>
+> **E2E, committed as `7d960ef`.** `e2e/src/screens/ScratchpadPanel.ts` became `ScratchpadBoard.ts`,
+> mirroring `TodoBoard.ts` (atomic `view()`, card rows, detail panel); `TodoBoard.ts` took the shared
+> handle renames (`data-panel-route`, `data-panel`, `data-card-trigger`, `data-card-row`,
+> `data-detail-back`, `data-detail-done`, `data-board-toolbar`, `data-board-count`, `data-group`). The
+> conflict walk now starts the editor **before** the lead agent's concurrent write, because a
+> read-mode document follows the live revision; had that order not changed, the walk would have gone
+> permanently green against a conflict that could no longer occur. Inbound scratchpad navigation now
+> asserts the detail panel with focus on Back. `todoBoard.detailText` gained a wait on no
+> `[aria-busy="true"]`, closing a latent race the deferred Markdown render exposed. Mutation-verified
+> twice: dropping `ScratchpadBoard`'s `useMasterDetail` `onOpen` reddens only the conflict assertion;
+> dropping `useMasterDetail.open`'s `pendingFocusRef` write reddens exactly three `backFocused`
+> assertions (three, not two, because both boards now share the hook). Both restored byte-clean,
+> sha256-verified. A stale charter claim that `SlidingPanels` still had a `transform`-only settle
+> defect was struck as untrue.
+>
+> **Gates, all run.** `pnpm -C crates/app/ui test` **205 files / 1568 tests passed** (191 / 1452 at
+> session start); `pnpm -C crates/app/ui typecheck`, `lint` and `run format:check` clean;
+> `node scripts/check-theme-colors.mjs` clean; `./scripts/check-file-size.sh` reports no new frontend
+> file over 400 lines (the four it lists are pre-existing); `just e2e` **20 spec files / 71 tests
+> passed, 5m47s**; `just lint` exit 0.
+>
+> **The perf pass: skeleton symptom fixed, lag symptom NOT fixed.** Owner report: "when I'm opening
+> scratchpad/todo detail page, only first time I see a skeleton loading. Also after first time,
+> everything starts to be too slow and laggy." `.scratch/scratchpad-board/detail-perf-diagnosis.md`
+> holds the diagnosis plus a dated after-measurement section. All numbers are from the **dev build**
+> (React dev + StrictMode); production will trim the React stretches but not the parse or the
+> style+layout.
+>
+> *Nothing leaks.* Editor instances 0/1/0 and DOM node counts identical across 12 open/leave cycles.
+> "Gets worse over time" never reproduced, before or after.
+>
+> *Skeleton: fixed.* F3 mounts the editor only after the panel reports settled
+> (`panelSettledContext`, with a bounded fallback of two rAFs plus `--dur-sheet` so a `MarkdownView`
+> outside any panel still mounts). The stand-in painted on **36 of 36** warm opens, visible 140–250 ms
+> against its 150 ms reveal delay; before, it had 7–34 ms and could never paint.
+>
+> *Lag: not fixed.* Todo opens 223/218/247 ms before → 200/307/285 ms after; scratchpads
+> 355/1081/368 → 356/1236/375. **Click-to-content is ~250 ms slower** (428–526 → 672–821 ms) because
+> F3 moved the freeze from mid-slide to after the slide. Long notes did improve: the 98k-char note
+> 1910–2791 → ~1109–1401 ms, its forced layout ~306 → ~130 ms (F6).
+>
+> *Why the fixes missed.* The diagnosis attributed 732 ms to `EditorView.setProps`, but that figure
+> existed only under that profile's own instrumentation; the clean meter showed the same todo at
+> 218 ms all along. F1 (memoised `useEditor` options, `setOptions` 8 → 4 per open) and F2
+> (`overflowAnchor = "none"` from `onMount`, `elementFromPoint` now 0 calls per open, real rather than
+> decoration) are correctly implemented and engaged but removed a cost that was not there. F5
+> (letter-spacing) and F4 (`content-visibility: hidden` on the resting off-screen panel) measured **no
+> effect**; F5's earlier 243 → 104 ms did not reproduce. F7 (no `scrollIntoView` on open) saved a
+> little: first block 112–192 → 100–147 ms.
+>
+> *The real costs, now named.* A ~100–130 ms page style+layout at the reveal on every open regardless
+> of document size (123 ms on a 2.5k todo, 132 ms on the 98k note), and `MarkdownManager.parse` at
+> 4 / 92 / 670 ms for 2.5k / 20k / 98k chars, running inside `setContent` before the transaction,
+> which is why the earlier `dispatchTransaction` number never saw it.
+>
+> *F6 side effect.* The scrollbar range grows 11,454 → 31,567 px during the first descent of a long
+> note, and page-sized scrolls shift content 181–589 px on 4 of 44 steps, because
+> `contain-intrinsic-size: auto 1.5em` guesses 19.5 px for blocks averaging ~225 px.
+>
+> The owner deferred further perf work ("I'll do this later"). It is an open thread, not done.
+>
+> **Status.** Everything except `7d960ef` is uncommitted on `feat/todo-workspace-ux` (PR #200). The
+> UI work is `Done — pending verify`: unit and e2e gates are green and both boards were driven in a
+> real window, but the owner has not accepted the surface, and the perf half is explicitly
+> unresolved.
+>
+> **Open threads.** F8 (cache the parsed ProseMirror document per `id:revision`, or render read-only
+> bodies through a lighter path than a full editor) is the only thing that fixes long notes; attribute
+> the ~100–130 ms per-open style+layout before touching CSS again; decide whether F5 and F4 are
+> reverted as unearned changes; tune `contain-intrinsic-size` or reconsider F6; decide whether always
+> painting a skeleton is worth ~250 ms later content. Also: `e2e/src/screens/TodoBoard.ts` is 525
+> lines, past the ~400 split smell; the `e2e/.tmp/` fixture dir sits inside the repo, so a fixture
+> project without `.git` makes the app's version-control rail discover the Soloist repo itself;
+> `DocumentRoster`/`DocumentList`/`DocumentPanel` now serve diagrams only and become deletable when
+> diagrams move to the board kit; the orchestration tests still use literal selectors where exported
+> handle constants exist.
+>
+> **Next session should start with:** landing the uncommitted `OrchestrationPane` navigation fix
+> together with the rest of this change set on `feat/todo-workspace-ux` and updating PR #200. Then
+> the deferred perf question: F8 for the parse, attribution of the ~100–130 ms per-open style+layout
+> before any further CSS change, and the F4/F5 revert decision alongside it. Then the diagram
+> surface's migration onto the board kit, after which `DocumentRoster`/`DocumentList`/`DocumentPanel`
+> are deleted.
+
+> **LATEST (2026-09-03): PROSE STAND-IN — TODO DETAIL OPENS ON THE CLICK — `Done — pending verify`,
 > uncommitted on `feat/todo-workspace-ux` over `d09c029`.**
 > Clicking a todo row took noticeably long before the detail panel began sliding in. The cause was
 > read out of the code rather than guessed, and it is not a fetch: `TodoView` already carries
@@ -4165,6 +4297,27 @@ the most risk. See `plan/phases/phase-13-parity-qa-testing.md` appendix for the 
 ---
 
 ## Decisions / changes this session
+
+### Scratchpad board on the shared master–detail kit (2026-09-06) — UI `Done — pending verify`, perf unresolved
+
+- **Four owner decisions, confirmed in-session.** The scratchpad detail opens read-first with an
+  Edit action, not straight into the editor; this pass covers scratchpads only and diagrams stay on
+  the old roster for a follow-up; a new scratchpad is created from an inline "New scratchpad" strip
+  on the board; and the prose body's letter-spacing was dropped, recorded in `DESIGN.md` as **R4.9**.
+- **One master–detail kit, both boards on it.** `components/common/` now holds the board and detail
+  parts (`CollapsibleGroup`, `BoardToolbar`, `BoardSkeleton`, `CardRow`, `DetailPane`,
+  `DetailActions`, the moved `TagList`/`TagFilterChips`) with `store/useMasterDetail.ts` and
+  `store/boardFilter.ts` behind them; the todo board was rebased onto the same kit with no behaviour
+  change. `TodoPanels.tsx` was a byte-twin of the already-existing `SlidingPanels` and was deleted
+  with the other duplicates.
+- **`OrchestrationPane` seeds its view from the inbound focus.** `useState<View>(focus?.view ??
+  DEFAULT_VIEW)`: the pane is always a fresh mount on an inbound navigation, so a switch-on-change
+  never fires. A regression from `ae4c570`; fixed with the pane's first `focus` regression test.
+- **Perf work deferred by the owner.** F3 (mount the editor after the panel settles) fixed the
+  missing skeleton; the lag is not fixed and click-to-content is ~250 ms slower. F4 and F5 measured
+  no effect and remain in the tree pending a revert decision. F8 (parse cache per `id:revision`, or a
+  lighter read-only path) is the identified fix for long notes; the ~100–130 ms per-open style+layout
+  is unattributed.
 
 ### Region loading system (2026-09-03) — `Done — pending verify`
 

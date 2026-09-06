@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TodoStatus, TodoView } from "@/domain";
-import { EMPTY_TODO_FILTER, filterTodos, isFiltering, todoTags } from "@/store/todoFilter";
+import { EMPTY_TODO_FILTER, filterTodos, isFiltering } from "@/store/todoFilter";
 
 // A minimal TodoView for filtering — only the fields the filter reads carry meaning here.
 function todo(
@@ -58,12 +58,6 @@ describe("filterTodos", () => {
   it("combines facets with AND", () => {
     const openUiAutosave = filterTodos(TODOS, { search: "autosave", status: "open", tag: "ui" });
     expect(openUiAutosave.map((t) => t.id)).toEqual([4]);
-  });
-});
-
-describe("todoTags", () => {
-  it("returns the sorted distinct tags", () => {
-    expect(todoTags(TODOS)).toEqual(["core", "docs", "editor", "ui"]);
   });
 });
 

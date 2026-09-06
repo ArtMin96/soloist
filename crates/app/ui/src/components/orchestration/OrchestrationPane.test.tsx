@@ -44,12 +44,53 @@ vi.mock("@/store/useTodoEditor", () => ({
   }),
 }));
 
+// The scratchpad board's hooks are the pane's remaining IPC. The `@/api` factory above throws on any
+// export it does not name, so the boards' hooks are stubbed rather than the api mock extended.
+vi.mock("@/store/useScratchpadActions", () => ({
+  useScratchpadActions: (): ScratchpadActionsStore => ({
+    error: null,
+    createError: null,
+    create: vi.fn(),
+    archive: vi.fn(),
+    exportMarkdown: vi.fn(),
+    copyMarkdown: vi.fn(),
+    clearError: vi.fn(),
+  }),
+}));
+
+vi.mock("@/store/useScratchpadEditor", () => ({
+  useScratchpadEditor: (): ScratchpadEditorStore => ({
+    name: null,
+    document: loading(),
+    baseRevision: null,
+    mountKey: 0,
+    conflict: null,
+    error: null,
+    open: vi.fn(),
+    close: vi.fn(),
+    save: vi.fn(),
+    reload: vi.fn(),
+    rename: vi.fn(),
+    copyLink: vi.fn(),
+  }),
+}));
+
 import { orchestrationSnapshot } from "@/api";
+import { CARD_ROW_ATTRIBUTE } from "@/components/common/CardRow";
 import { OrchestrationPane } from "@/components/orchestration/OrchestrationPane";
+import { loading } from "@/store/loadable";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import type { OrchestrationSnapshot, ProjectView, TimerView, TodoView } from "@/domain";
+import type {
+  OrchestrationSnapshot,
+  ProjectView,
+  ScratchpadSummary,
+  TimerView,
+  TodoView,
+} from "@/domain";
 import type { TodoActionsStore } from "@/store/useTodoActions";
 import type { TodoEditorStore } from "@/store/useTodoEditor";
+import type { ScratchpadActionsStore } from "@/store/useScratchpadActions";
+import type { ScratchpadEditorStore } from "@/store/useScratchpadEditor";
 import { holdRead } from "@/test/heldRead";
 
 const read = vi.mocked(orchestrationSnapshot);
@@ -72,6 +113,16 @@ const todo: TodoView = {
   locked_by: null,
   scratchpad: null,
   revision: 1,
+};
+
+const scratchpad: ScratchpadSummary = {
+  id: 1,
+  name: "release-plan",
+  tags: [],
+  archived: false,
+  revision: 1,
+  gist: "",
+  updated_at: 0,
 };
 
 function timer(id: number): TimerView {
@@ -118,6 +169,10 @@ function showTodos() {
   fireEvent.click(screen.getByRole("radio", { name: "To-dos" }));
 }
 
+function showScratchpads() {
+  fireEvent.click(screen.getByRole("radio", { name: "Scratchpads" }));
+}
+
 function timersOption(): HTMLElement {
   return screen.getByRole("radio", { name: /Timers/ });
 }
@@ -161,6 +216,60 @@ describe("OrchestrationPane", () => {
     // the whole of the recovery.
     expect(await screen.findByText("Ship the release")).toBeTruthy();
     expect(screen.queryByText("Could not load to-dos.")).toBeNull();
+  });
+
+  it("shows the scratchpad stand-in while the first snapshot is in flight, and the empty board only after it lands", async () => {
+    const settle = holdRead(read);
+    pane();
+
+    showScratchpads();
+
+    // A project with no scratchpads and a project whose scratchpads have not been read look nothing
+    // alike to a reader: the empty state is a statement, not something to say while waiting.
+    expect(screen.queryByText("No scratchpads yet")).toBeNull();
+    const region = screen.getByRole("status");
+    expect(region.getAttribute("aria-busy")).toBe("true");
+    expect(region.textContent).toContain("Loading scratchpads");
+
+    settle(snapshot());
+
+    expect(await screen.findByText("No scratchpads yet")).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("renders the scratchpad board once the snapshot lands", async () => {
+    read.mockResolvedValue(snapshot({ scratchpads: [scratchpad] }));
+    pane();
+
+    showScratchpads();
+
+    expect(await screen.findByText("Release plan")).toBeTruthy();
+    // The board's own card rows, so the pane is proven to mount the board rather than any other
+    // surface that happens to name the same scratchpad.
+    expect(document.querySelectorAll(`[${CARD_ROW_ATTRIBUTE}]`)).toHaveLength(1);
+  });
+
+  // The pane mounts *with* the activation already on its props. Opening a session-work item from a
+  // terminal header deselects the process and names the target in one commit, so the pane the
+  // navigation lands in is always a fresh one — a switch that only reacts to `focus` changing after
+  // mount leaves the reader on the agents tree instead of the item they asked for.
+  it("opens on the view a navigation named, when that navigation is what mounted it", async () => {
+    read.mockResolvedValue(snapshot({ todos: [todo] }));
+    render(
+      <TooltipProvider>
+        <OrchestrationPane project={project} focus={{ view: "todos", id: todo.id, nonce: 1 }} />
+      </TooltipProvider>,
+    );
+
+    // The board's own card, rather than the title anywhere on screen: the same navigation opens
+    // that todo's detail panel, which names it too, and the question here is which *view* the pane
+    // opened on.
+    const card = await waitFor(() => {
+      const rows = document.querySelectorAll(`[${CARD_ROW_ATTRIBUTE}]`);
+      expect(rows).toHaveLength(1);
+      return rows[0] as HTMLElement;
+    });
+    expect(within(card).getByText("Ship the release")).toBeTruthy();
   });
 
   it("keeps the timer count off the view switcher until the snapshot is ready", async () => {

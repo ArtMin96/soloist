@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { DocumentList, type DocumentRow } from "@/components/orchestration/DocumentList";
 import type { DocumentKind } from "@/components/orchestration/DocumentTitle";
-import { TagFilterChips } from "@/components/orchestration/TagFilterChips";
+import { TagFilterChips } from "@/components/common/TagFilterChips";
 import { humanizeName } from "@/lib/humanize";
 
 /** The row shape the roster's search, tag facet and archived grouping need on top of `DocumentRow`. */

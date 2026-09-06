@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { RevisionConflictNotice } from "@/components/RevisionConflictNotice";
+import { AutosaveStatus } from "@/components/editor/AutosaveStatus";
 import { TodoDocFields } from "@/components/orchestration/TodoDocFields";
 import { useAutosave } from "@/components/editor/useAutosave";
 import type { SaveOutcome } from "@/store/saveOutcome";
@@ -53,8 +54,6 @@ export function TodoEditor({
     paused: conflict != null,
   });
 
-  const statusLabel = autosave.saving ? "Saving…" : autosave.dirty ? "Unsaved changes" : "Saved";
-
   return (
     <div className="flex flex-col gap-2">
       {conflict && (
@@ -95,13 +94,7 @@ export function TodoEditor({
       />
 
       <footer className="flex items-center">
-        <span
-          className="type-label text-muted-foreground"
-          aria-live="polite"
-          data-todo-autosave-status
-        >
-          {statusLabel}
-        </span>
+        <AutosaveStatus saving={autosave.saving} dirty={autosave.dirty} />
       </footer>
     </div>
   );

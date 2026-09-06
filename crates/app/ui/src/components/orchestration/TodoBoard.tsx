@@ -1,58 +1,29 @@
-import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
+import { CARD_TRIGGER_ATTRIBUTE } from "@/components/common/CardRow";
+import { CollapsibleGroup } from "@/components/common/CollapsibleGroup";
+import { SlidingPanels } from "@/components/common/SlidingPanels";
 import { TodoCreateForm } from "@/components/orchestration/TodoCreateForm";
 import { TodoDetail, type TodoEditState } from "@/components/orchestration/TodoDetail";
-import { TodoGroup } from "@/components/orchestration/TodoGroup";
 import { TodoItem } from "@/components/orchestration/TodoItem";
-import { TodoPanels, type TodoPanel } from "@/components/orchestration/TodoPanels";
 import { TodoToolbar } from "@/components/orchestration/TodoToolbar";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { distinctTags } from "@/store/boardFilter";
+import { createNavigationLedger, useMasterDetail } from "@/store/useMasterDetail";
 import { useCollapseState } from "@/store/useCollapseState";
 import { useTodoActions } from "@/store/useTodoActions";
 import { useTodoEditor } from "@/store/useTodoEditor";
 import { groupTodosByScratchpad } from "@/store/todoGrouping";
-import {
-  EMPTY_TODO_FILTER,
-  filterTodos,
-  isFiltering,
-  todoTags,
-  type TodoFilter,
-} from "@/store/todoFilter";
+import { EMPTY_TODO_FILTER, filterTodos, isFiltering, type TodoFilter } from "@/store/todoFilter";
 import type { BoardView } from "@/lib/todo";
 import type { AgentNode, ScratchpadSummary, TodoView } from "@/domain";
 
 /** Namespaces this board's persisted collapse keys so they cannot collide with the sidebar's. */
 const COLLAPSE_PREFIX = "todos.scratchpad";
 
-// The last activation each project's board has already navigated for. A `focusNonce` is one
-// navigation, not a standing instruction — but the pane leaves it set on the props after acting on
-// it and unmounts the board whenever the user switches to another orchestration view, so a fresh
-// board would see the same activation still standing and open a detail nobody asked for. The board
-// cannot tell that case from a genuine one: an activation legitimately arrives at mount too, since
-// opening a todo from a terminal mounts the board with the nonce already on its props. So the fact
-// has to be remembered somewhere that outlives the component, which is here. One entry per project
-// the user navigates into, holding one number.
-const navigatedNonces = new Map<number, number>();
-
-/**
- * The detail panel's target. `showing` is the route — false while the panel slides back out, which
- * is what keeps the todo rendered for the length of that movement rather than blanking on the way.
- */
-interface DetailTarget {
-  id: number;
-  showing: boolean;
-}
-
-// Moves DOM focus into the panel a route change just brought on screen, aiming at `within` when that
-// panel offers it and at the panel itself when it does not. Queried by the same `data-todo-*` handles
-// the end-to-end walks use, rather than threading refs down through two panels' components. The
-// scroll is asked for explicitly and refused to `focus`, so bringing a row back into view stays
-// vertical and neither call can drag the panel track sideways.
-function focusPanel(panel: TodoPanel, within: string) {
-  const root = document.querySelector<HTMLElement>(`[data-todo-panel="${panel}"]`);
-  const target = root?.querySelector<HTMLElement>(within) ?? root;
-  target?.scrollIntoView({ block: "nearest" });
-  target?.focus({ preventScroll: true });
-}
+// Module level, so it outlives the board: the orchestration pane unmounts this component whenever
+// the user switches view and re-delivers the same activation to the fresh one — see
+// `NavigationLedger` for why that cannot be told apart from a genuine navigation at mount.
+const ledger = createNavigationLedger();
 
 // The to-do board: the project's shared work items, filterable and fully editable. The todos come
 // from the live snapshot (refreshed on TodoChanged); every write — create, edit, complete, comment —
@@ -97,12 +68,11 @@ export function TodoBoard({
 }) {
   const actions = useTodoActions(project);
   const editor = useTodoEditor(project);
-  const [detail, setDetail] = useState<DetailTarget | null>(null);
   const [filter, setFilter] = useState<TodoFilter>(EMPTY_TODO_FILTER);
   const [view, setView] = useState<BoardView>("grouped");
   const [collapsed, setCollapsed] = useCollapseState();
 
-  const tags = useMemo(() => todoTags(todos), [todos]);
+  const tags = useMemo(() => distinctTags(todos), [todos]);
   // Filtering is the toolbar's own render — the search box, status select and tag chips must track
   // every keystroke and click exactly, so they stay bound to the live `filter`. Everything downstream
   // of it (the filtered rows, their grouping, and whether to group at all) is what can lag: deferring
@@ -116,89 +86,32 @@ export function TodoBoard({
   const titleOf = (id: number) => todos.find((todo) => todo.id === id)?.doc.title;
   const labelOf = (id: number) => agents.find((agent) => agent.id === id)?.label;
 
-  // Resolved against the whole snapshot, never the filtered set: the toolbar's filter belongs to the
-  // list panel, and searching there must not slam an open detail shut.
-  const detailTodo = detail != null ? todos.find((todo) => todo.id === detail.id) : undefined;
-  const showing: TodoPanel = detail?.showing ? "detail" : "list";
-
-  const pendingFocusRef = useRef<{ panel: TodoPanel; within: string } | null>(null);
-
   // Ends the open edit session whenever navigation leaves the todo it belongs to, so unsaved edits
   // can neither resurface on a later re-open nor follow the board onto a different todo.
   const endEditUnless = (id: number | null) => {
     if (editor.mode === "edit" && editor.editingId !== id) editor.close();
   };
 
-  const openDetail = (id: number) => {
-    endEditUnless(id);
-    setDetail({ id, showing: true });
-    pendingFocusRef.current = { panel: "detail", within: "[data-todo-back]" };
-  };
-
-  const showList = () => setDetail((current) => (current ? { ...current, showing: false } : null));
-
-  const back = () => {
-    const from = detail?.id;
-    endEditUnless(null);
-    showList();
-    pendingFocusRef.current = {
-      panel: "list",
-      within: `[data-todo-id="${from}"] [data-todo-trigger]`,
-    };
-  };
-
-  const startCreate = () => {
-    showList();
-    editor.startCreate();
-  };
-
-  // A route change is the one moment focus can be lost: the panel leaving goes inert, and focus left
-  // inside it would fall to the document body and restart keyboard traversal at the top of the app.
-  // Laid out rather than deferred, so there is no painted frame in between; read from a ref rather
-  // than from the route, so a repeat navigation to the todo already open still refocuses it.
-  useLayoutEffect(() => {
-    const pending = pendingFocusRef.current;
-    if (pending == null) return;
-    pendingFocusRef.current = null;
-    focusPanel(pending.panel, pending.within);
+  const master = useMasterDetail<number>({
+    project,
+    ledger,
+    present: (id) => todos.some((todo) => todo.id === id),
+    rowTrigger: (id) => `[data-todo-id="${id}"] [${CARD_TRIGGER_ATTRIBUTE}]`,
+    focusKey: focusId,
+    focusNonce,
+    onOpen: endEditUnless,
+    onLeave: () => endEditUnless(null),
   });
 
-  // A todo can vanish from under an open detail panel — deleted, or moved out of this project. There
-  // is nothing left to show or edit, so the board drops straight back to the list rather than holding
-  // a panel over a todo that no longer exists. Only while the panel is showing: one already sliding
-  // out is cleared by `onSettled` a beat later, and cutting it short would blank it mid-movement.
-  // Adjusted here during render, keyed off `todos` itself changing, so the drop lands the same
-  // render the todo disappears in rather than painting a dead panel for a frame first.
-  if (detail != null && detail.showing && detailTodo == null) {
-    setDetail(null);
-    if (editor.mode === "edit" && editor.editingId === detail.id) editor.close();
-  }
+  // Resolved against the whole snapshot, never the filtered set: the toolbar's filter belongs to the
+  // list panel, and searching there must not slam an open detail shut.
+  const detailTodo =
+    master.detailKey != null ? todos.find((todo) => todo.id === master.detailKey) : undefined;
 
-  // Whether the navigation target has actually arrived in the live snapshot. Coming from a freshly
-  // mounted pane, `focusNonce` can be set before the first snapshot lands — `targetPresent` gates
-  // the navigation below on that, and its own presence in the effect's deps is what makes the
-  // navigation retry once the todo shows up, rather than silently missing it.
-  const targetPresent = focusId != null && todos.some((todo) => todo.id === focusId);
-
-  // Cross-surface navigation's inbound half: a fresh nonce opens that todo's detail panel directly,
-  // so the target is on screen whatever the list panel's filter and grouping happen to be. An
-  // activation already navigated for is spent, even across a remount — see `navigatedNonces`.
-  useEffect(() => {
-    if (focusId == null || focusNonce == null || !targetPresent) return;
-    if (navigatedNonces.get(project) === focusNonce) return;
-    // Marks the nonce spent before acting on it: a persistent module-level Map, not render state —
-    // render must stay replayable (Strict Mode, discarded renders), and mutating it there would
-    // mark a navigation spent that never actually happened. `openDetail` in turn writes
-    // `pendingFocusRef.current`, a ref write that render itself may not make either — so the panel
-    // open (and the ref-driven focus move that depends on it) genuinely belongs here, once, in
-    // response to this external navigation event.
-    navigatedNonces.set(project, focusNonce);
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- opens in response to an external navigation event (see above); the ref write it makes cannot happen during render.
-    openDetail(focusId);
-    // Only the navigation's own trigger conditions belong here — `openDetail` closes over the live
-    // editor, a fresh object every render, which would re-fire this on every one.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusNonce, focusId, targetPresent, project]);
+  const startCreate = () => {
+    master.showList();
+    editor.startCreate();
+  };
 
   // The edit surface for one todo, present only while it is the one being edited. A concurrent write
   // that moves the live todo past the opened revision is the conflict the editor pauses on.
@@ -226,7 +139,7 @@ export function TodoBoard({
     <li key={todo.id} data-todo-id={todo.id}>
       <TodoItem
         todo={todo}
-        onOpen={() => openDetail(todo.id)}
+        onOpen={() => master.open(todo.id)}
         lockOwnerLabel={todo.locked_by != null ? labelOf(todo.locked_by) : undefined}
         onOpenAgent={onOpenAgent}
       />
@@ -281,7 +194,7 @@ export function TodoBoard({
           // card is addressed the same way whichever view is showing.
           <div className="flex flex-col gap-2 px-3 pt-2 pb-2">
             {groups.map((group) => (
-              <TodoGroup
+              <CollapsibleGroup
                 key={group.key}
                 label={group.label}
                 count={group.todos.length}
@@ -289,7 +202,7 @@ export function TodoBoard({
                 onOpenChange={(open) => setCollapsed(`${COLLAPSE_PREFIX}.${group.key}`, !open)}
               >
                 <ul className="flex flex-col gap-2 pt-1 pb-2 pl-1">{group.todos.map(card)}</ul>
-              </TodoGroup>
+              </CollapsibleGroup>
             ))}
           </div>
         ) : (
@@ -301,14 +214,14 @@ export function TodoBoard({
 
   return (
     <div className="flex h-full min-h-0 flex-col tracking-[var(--tracking-body)]">
-      <TodoPanels
-        showing={showing}
+      <SlidingPanels
+        showing={master.showing}
         list={list}
         detail={
           detailTodo && (
             <TodoDetail
               todo={detailTodo}
-              onBack={back}
+              onBack={master.back}
               titleOf={titleOf}
               lockOwnerLabel={
                 detailTodo.locked_by != null ? labelOf(detailTodo.locked_by) : undefined
@@ -325,9 +238,7 @@ export function TodoBoard({
             />
           )
         }
-        // The detail's todo stays rendered until its panel has finished sliding out, so the panel
-        // leaving carries the content the reader was looking at rather than blanking on the way.
-        onSettled={() => setDetail((current) => (current?.showing === false ? null : current))}
+        onSettled={master.onSettled}
       />
     </div>
   );

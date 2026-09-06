@@ -1,110 +1,89 @@
-import { Archive, ArchiveRestore, Link2 } from "lucide-react";
+import { AutosaveStatus } from "@/components/editor/AutosaveStatus";
+import { LazyRichTextEditor } from "@/components/editor/LazyRichTextEditor";
+import { useAutosave } from "@/components/editor/useAutosave";
 import { RevisionConflictNotice } from "@/components/RevisionConflictNotice";
-import { Button } from "@/components/ui/button";
-import { ScratchpadBody } from "@/components/orchestration/ScratchpadBody";
-import { ScratchpadTitle } from "@/components/orchestration/ScratchpadTitle";
-import { humanizeName } from "@/lib/humanize";
 import type { SaveOutcome } from "@/store/saveOutcome";
 import type { ScratchpadConflict } from "@/store/useScratchpadEditor";
 
+/**
+ * Names the document being edited. Distinct from the detail pane's own handle, which says only that
+ * a scratchpad is open: this one is present exactly while it is being written to.
+ */
+export const SCRATCHPAD_EDITOR_ATTRIBUTE = "data-scratchpad-editor";
+
+/** The editor's accessible name, shared by the surface and whoever addresses it. */
+export const SCRATCHPAD_BODY_LABEL = "Scratchpad body";
+
 interface ScratchpadEditorProps {
+  /** The scratchpad's raw name handle — the document this surface is writing to. */
   name: string;
+  /** The Markdown to seed the editor with; read once, since the parent remounts per open and reload. */
   initialBody: string;
-  revision: number | null;
-  /** Bumped on open/reload so the editor body remounts with fresh content and undo history. */
-  mountKey: number;
+  /** A concurrent write moved the scratchpad past the opened revision, or null. */
   conflict: ScratchpadConflict | null;
+  /** A non-conflict refusal of a save (an invalid document), or null. */
   error: string | null;
-  /** Whether the open scratchpad is archived — flips the header control between Archive and Restore. */
-  archived: boolean;
+  /** Persists the Markdown body revision-guarded — routed to the core. */
   onSave: (markdown: string) => Promise<SaveOutcome>;
+  /** Reload the scratchpad fresh, adopting the concurrent write and discarding local edits. */
   onReload: () => void;
-  onCopyLink: () => void;
-  /** Archives the open scratchpad, or restores it when already archived (also bound to Ctrl+Shift+W). */
-  onArchive: () => void;
-  /** Renames the open scratchpad; rejects with the core's refusal so the field can surface it. */
-  onRename: (to: string) => Promise<void>;
+  /** Every keystroke's Markdown, so the pane can export or copy text that is not saved yet. */
+  onBodyChange: (markdown: string) => void;
 }
 
-// The scratchpad's editing surface: a persistent header (the renamable title, the raw handle when it
-// reads differently, revision, actions), the conflict banner, and the remounting editor body.
-// Presentational — the body, the revision guard, and every callback arrive as props; the parent owns
-// the read/write. A stale save surfaces the conflict banner
-// (the core already refused it, so nothing was clobbered) with a Reload to the other edit; while it
-// shows, autosave is paused (`paused`) so the rejected edit is never retried behind the user's back.
-// Validity is the core's call, surfaced as the error line.
+/**
+ * The edit surface for one scratchpad: the rich-text body plus its autosave. Edits are debounced by
+ * `useAutosave` and flush on blur, Cmd/Ctrl+S, and unmount — never echoed back into the editor, so
+ * the caret never jumps. There is deliberately no Save control: leaving edit mode unmounts this
+ * surface and the unmount flush is what persists the last keystrokes.
+ *
+ * A stale save is refused by the core's revision guard, and the parent passes the `conflict` it
+ * learned from the re-read; that pauses autosave so the rejected edit is never retried behind the
+ * user's back, and offers the Reload that resolves it. Nothing was overwritten either way.
+ */
 export function ScratchpadEditor({
   name,
   initialBody,
-  revision,
-  mountKey,
   conflict,
   error,
-  archived,
   onSave,
   onReload,
-  onCopyLink,
-  onArchive,
-  onRename,
+  onBodyChange,
 }: ScratchpadEditorProps) {
-  // The handle earns its place only when the title no longer reads as it — a name the user already
-  // wrote is its own handle, and printing it twice would be noise.
-  const handle = humanizeName(name) === name ? null : name;
-  return (
-    <div className="flex h-full min-w-0 flex-col">
-      <header className="flex h-9 shrink-0 items-center gap-2 border-b px-3">
-        <ScratchpadTitle name={name} onRename={onRename} />
-        {handle && (
-          <span
-            className="type-label max-w-[12rem] shrink-0 truncate font-mono text-muted-foreground"
-            title={`Handle: ${handle}`}
-          >
-            {handle}
-          </span>
-        )}
-        {revision != null && (
-          <span className="type-label shrink-0 font-mono tabular-nums text-muted-foreground">
-            revision {revision}
-          </span>
-        )}
-        <Button variant="ghost" size="sm" onClick={onArchive}>
-          {archived ? (
-            <>
-              <ArchiveRestore aria-hidden /> Restore
-            </>
-          ) : (
-            <>
-              <Archive aria-hidden /> Archive
-            </>
-          )}
-        </Button>
-        <Button variant="ghost" size="sm" onClick={onCopyLink}>
-          <Link2 aria-hidden /> Copy link
-        </Button>
-      </header>
+  const autosave = useAutosave({ onSave, paused: conflict != null });
 
+  return (
+    <div {...{ [SCRATCHPAD_EDITOR_ATTRIBUTE]: name }} className="flex flex-col gap-2">
       {conflict && (
         <RevisionConflictNotice
-          className="mx-3 mt-3"
           subject="scratchpad"
           revision={conflict.actual}
           onReload={onReload}
         />
       )}
 
-      {error && (
-        <p className="mx-3 mt-3 text-[0.8125rem] text-destructive" aria-live="polite">
+      {/* The conflict banner already says why the write did not land, so the two never stack. */}
+      {error && !conflict && (
+        <p className="type-body text-destructive" aria-live="polite">
           {error}
         </p>
       )}
 
-      <ScratchpadBody
-        key={`${name}:${mountKey}`}
-        initialBody={initialBody}
-        name={name}
-        onSave={onSave}
-        paused={conflict != null}
+      <LazyRichTextEditor
+        initialMarkdown={initialBody}
+        ariaLabel={SCRATCHPAD_BODY_LABEL}
+        outline
+        onChange={(markdown) => {
+          onBodyChange(markdown);
+          autosave.push(markdown);
+        }}
+        onSaveShortcut={autosave.flush}
+        onBlur={autosave.flush}
       />
+
+      <footer className="flex items-center">
+        <AutosaveStatus saving={autosave.saving} dirty={autosave.dirty} />
+      </footer>
     </div>
   );
 }

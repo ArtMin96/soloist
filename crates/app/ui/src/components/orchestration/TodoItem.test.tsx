@@ -56,8 +56,8 @@ describe("TodoItem", () => {
       }),
     });
 
-    expect(document.querySelector("[data-todo-card]")?.getAttribute("data-slot")).toBe("card");
-    expect(document.querySelector("[data-todo-trigger]")?.getAttribute("data-slot")).toBe("button");
+    expect(document.querySelector("[data-card-row]")?.getAttribute("data-slot")).toBe("card");
+    expect(document.querySelector("[data-card-trigger]")?.getAttribute("data-slot")).toBe("button");
     for (const selector of [
       "[data-todo-status]",
       "[data-todo-blockers]",
@@ -72,7 +72,7 @@ describe("TodoItem", () => {
     row();
 
     const content = document.querySelector('[data-slot="card-content"]') as HTMLElement;
-    const trigger = document.querySelector("[data-todo-trigger]") as HTMLElement;
+    const trigger = document.querySelector("[data-card-trigger]") as HTMLElement;
 
     expect(content.className).toContain("p-0");
     expect(content.className).toContain("gap-0");
@@ -85,7 +85,7 @@ describe("TodoItem", () => {
   it("yields the title alone on the first line, so the status label is never clipped", () => {
     row({ todo: todo({ blocked_by: [2], blockers: [2], locked_by: 9 }), onOpenAgent: vi.fn() });
 
-    const trigger = document.querySelector("[data-todo-trigger]") as HTMLElement;
+    const trigger = document.querySelector("[data-card-trigger]") as HTMLElement;
     expect(trigger.className).toContain("overflow-hidden");
 
     const title = document.querySelector("[data-todo-title]") as HTMLElement;
@@ -151,7 +151,7 @@ describe("TodoItem", () => {
     const onOpen = vi.fn();
     row({ onOpen });
 
-    fireEvent.click(document.querySelector("[data-todo-trigger]") as HTMLElement);
+    fireEvent.click(document.querySelector("[data-card-trigger]") as HTMLElement);
 
     expect(onOpen).toHaveBeenCalled();
   });
@@ -159,7 +159,7 @@ describe("TodoItem", () => {
   it("keeps the card's own button free of any interactive descendant", () => {
     row({ todo: todo({ locked_by: 9 }), onOpenAgent: vi.fn() });
 
-    const trigger = document.querySelector("[data-todo-trigger]") as HTMLElement;
+    const trigger = document.querySelector("[data-card-trigger]") as HTMLElement;
     expect(trigger.querySelector('button, [role="button"], a[href]')).toBeNull();
   });
 
@@ -199,7 +199,7 @@ describe("TodoItem", () => {
   it("is keyboard-reachable as its own tab stop, separate from the card's button", () => {
     row({ todo: todo({ locked_by: 9 }), onOpenAgent: vi.fn() });
 
-    const trigger = document.querySelector("[data-todo-trigger]") as HTMLElement;
+    const trigger = document.querySelector("[data-card-trigger]") as HTMLElement;
     const agent = document.querySelector("[data-todo-agent]") as HTMLElement;
     expect(agent.tagName).toBe("BUTTON");
     expect(agent.tabIndex).not.toBe(-1);

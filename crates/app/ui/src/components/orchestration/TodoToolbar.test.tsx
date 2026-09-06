@@ -27,7 +27,7 @@ function toolbar(overrides: Partial<React.ComponentProps<typeof TodoToolbar>> = 
 describe("TodoToolbar", () => {
   it("reports how many todos survive the filter, not the total", () => {
     toolbar({ shown: 2, total: 5 });
-    expect(document.querySelector("[data-todo-count]")?.textContent).toBe("2 of 5");
+    expect(document.querySelector("[data-board-count]")?.textContent).toBe("2 of 5");
   });
 
   it("reports the other view when the group control switches", () => {

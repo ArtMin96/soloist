@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { EditorContent, useEditor } from "@tiptap/react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { EditorContent, useEditor, type Editor } from "@tiptap/react";
+import type { EditorProps } from "@tiptap/pm/view";
 import { useLatestRef } from "@/store/useLatestRef";
 import { buildEditorExtensions } from "./editorExtensions";
 import { EditorOutline } from "./EditorOutline";
@@ -62,15 +63,17 @@ export default function RichTextEditor({
 
   const [findOpen, setFindOpen] = useState(false);
 
-  const editor = useEditor({
-    editable,
-    extensions: buildEditorExtensions({ placeholder, slash }),
-    content: "",
-    // Create the editor from an effect, never during render: the module is loaded lazily behind a
-    // Suspense boundary, and React can render-then-discard the first pass on resume. Building the
-    // editor (a side effect) inline would then leave a destroyed instance behind a live callback.
-    immediatelyRender: false,
-    editorProps: {
+  // TipTap re-applies the whole option set — a ProseMirror props update plus a state update, and so
+  // a full style and layout pass of the page — whenever it is handed extensions or editor props it
+  // has not seen before, and `configure()` mints a fresh extension on every call. Building each once
+  // per document keeps an ordinary re-render, of which an open document sees many, off that path.
+  const extensions = useMemo(
+    () => buildEditorExtensions({ placeholder, slash }),
+    [placeholder, slash],
+  );
+
+  const editorProps = useMemo<EditorProps>(
+    () => ({
       attributes: {
         class: "tiptap-body",
         "data-editor": "rich-text",
@@ -94,7 +97,35 @@ export default function RichTextEditor({
         }
         return false;
       },
+    }),
+    [ariaLabel, editable, onSaveRef],
+  );
+
+  // ProseMirror keeps the viewport steady across a redraw by hand — it measures the editor and
+  // hit-tests its way down it, two forced layouts per update — unless the editor node opts out with
+  // `overflow-anchor`. It tests for that by reading the JS property, which a browser that does not
+  // implement overflow-anchor never sets from a stylesheet, so the opt-out is assigned here rather
+  // than declared in CSS. Only a read-only document takes it: it has no caret to hold in place,
+  // whereas an editable one could drift under the writer's cursor.
+  const dropScrollAnchoring = useCallback(
+    ({ editor }: { editor: Editor }) => {
+      if (editable) return;
+      editor.view.dom.style.overflowAnchor = "none";
     },
+    [editable],
+  );
+
+  const editor = useEditor({
+    editable,
+    extensions,
+    content: "",
+    // Runs as the view is created, so even the first redraw skips the anchoring work.
+    onMount: dropScrollAnchoring,
+    // Create the editor from an effect, never during render: the module is loaded lazily behind a
+    // Suspense boundary, and React can render-then-discard the first pass on resume. Building the
+    // editor (a side effect) inline would then leave a destroyed instance behind a live callback.
+    immediatelyRender: false,
+    editorProps,
     onUpdate: ({ editor }) => onChangeRef.current(editor.getMarkdown()),
     onBlur: () => onBlurRef.current?.(),
   });

@@ -1,6 +1,8 @@
 import { useCallback, useRef, useState } from "react";
 import { scratchpadLink, scratchpadRead, scratchpadRename, scratchpadWrite } from "@/api";
+import { failed, loading, LoadStatus, ready, type Loadable } from "@/store/loadable";
 import type { SaveOutcome } from "@/store/saveOutcome";
+import type { ScratchpadView } from "@/domain";
 
 // A revision conflict surfaced to the panel: a write was refused because the scratchpad moved on
 // since it was opened. `actual` is the revision it now sits at, so the banner can name it.
@@ -12,19 +14,20 @@ export interface ScratchpadEditorStore {
   /** The open scratchpad's name, or null when none is open. */
   name: string | null;
   /**
-   * The Markdown the editor mounts with, or null while none is open or it is still loading. The
-   * editor is uncontrolled: this seeds it, and a change of `mountKey` remounts it with a fresh body
-   * and a fresh undo history — the body is never pushed back in mid-edit.
+   * The open scratchpad's body read: loading from `open` until the read answers, ready after, and
+   * failed when a read with nothing to fall back on is refused. A `reload` keeps the held document
+   * on screen until the fresh read lands, and a save that goes through replaces it with the view
+   * the write returned. Loading while nothing is open — the surface renders no body then.
    */
-  initialBody: string | null;
+  document: Loadable<ScratchpadView>;
   /** The revision the open body was loaded at — the guard the next write carries. */
   baseRevision: number | null;
   /** Bumped on every open and reload so the editor can key off it and remount with fresh content. */
   mountKey: number;
-  loading: boolean;
   /** A stale-write conflict to surface, or null. The core refused the write, so nothing was clobbered. */
   conflict: ScratchpadConflict | null;
-  /** A non-conflict failure (e.g. an invalid document), or null. */
+  /** A non-conflict failure beside a document that stays on screen (an invalid write, a refused
+   *  re-read, a refused link), or null. */
   error: string | null;
   open: (name: string) => void;
   close: () => void;
@@ -56,25 +59,36 @@ export interface ScratchpadEditorStore {
 // surface). Live snapshot refresh lives in the parent's `useOrchestration`.
 export function useScratchpadEditor(project: number): ScratchpadEditorStore {
   const [name, setName] = useState<string | null>(null);
-  const [initialBody, setInitialBody] = useState<string | null>(null);
+  const [document, setDocumentPhase] = useState<Loadable<ScratchpadView>>(loading());
   const [baseRevision, setBaseRevision] = useState<number | null>(null);
   const [mountKey, setMountKey] = useState(0);
-  const [loading, setLoading] = useState(false);
   const [conflict, setConflict] = useState<ScratchpadConflict | null>(null);
   const [error, setError] = useState<string | null>(null);
   const baseRevisionRef = useRef<number | null>(null);
   const loadRequestRef = useRef(0);
+  // The phase is mirrored in a ref as well as state so a read's own callbacks can tell a re-read
+  // beside a document already on screen from one with nothing to fall back on, without `load`
+  // being re-created — and restarting the autosave loop — on every phase change.
+  const documentRef = useRef<Loadable<ScratchpadView>>(loading());
+
+  const setDocument = useCallback((next: Loadable<ScratchpadView>) => {
+    documentRef.current = next;
+    setDocumentPhase(next);
+  }, []);
 
   const load = useCallback(
     (target: string) => {
       const request = ++loadRequestRef.current;
-      setLoading(true);
+      // A re-read keeps what is already on screen until the fresh body lands, so a revision the
+      // roster noticed never blanks the document the user is reading; with nothing held, the read
+      // is the only thing standing between the surface and its content.
+      if (documentRef.current.status !== LoadStatus.Ready) setDocument(loading());
       setConflict(null);
       setError(null);
       scratchpadRead(project, target)
         .then((view) => {
           if (request !== loadRequestRef.current) return;
-          setInitialBody(view.body);
+          setDocument(ready(view));
           setBaseRevision(view.revision);
           baseRevisionRef.current = view.revision;
           // Remount the editor so it re-seeds with the fresh body and starts a clean undo history.
@@ -82,36 +96,35 @@ export function useScratchpadEditor(project: number): ScratchpadEditorStore {
         })
         .catch((reason) => {
           if (request !== loadRequestRef.current) return;
-          setInitialBody(null);
-          setError(String(reason));
-        })
-        .finally(() => {
-          if (request === loadRequestRef.current) setLoading(false);
+          // Where the refusal belongs depends on whether there is a body to keep: beside a held
+          // document it is news about a re-read, and with nothing held it is the phase itself.
+          if (documentRef.current.status === LoadStatus.Ready) setError(String(reason));
+          else setDocument(failed(String(reason)));
         });
     },
-    [project],
+    [project, setDocument],
   );
 
   const open = useCallback(
     (target: string) => {
       setName(target);
-      setInitialBody(null);
+      setDocument(loading());
       setBaseRevision(null);
       baseRevisionRef.current = null;
       load(target);
     },
-    [load],
+    [load, setDocument],
   );
 
   const close = useCallback(() => {
     loadRequestRef.current += 1;
     setName(null);
-    setInitialBody(null);
+    setDocument(loading());
     setBaseRevision(null);
     baseRevisionRef.current = null;
     setConflict(null);
     setError(null);
-  }, []);
+  }, [setDocument]);
 
   const reload = useCallback(() => {
     if (name != null) load(name);
@@ -123,6 +136,10 @@ export function useScratchpadEditor(project: number): ScratchpadEditorStore {
       setError(null);
       try {
         const view = await scratchpadWrite(project, name, markdown, baseRevisionRef.current);
+        // The write answers with the document it stored, so what was just saved becomes what is
+        // read without a round trip — and without bumping `mountKey`, which would remount the
+        // editor and drop the caret mid-edit.
+        setDocument(ready(view));
         setBaseRevision(view.revision);
         baseRevisionRef.current = view.revision;
         return "saved";
@@ -143,7 +160,7 @@ export function useScratchpadEditor(project: number): ScratchpadEditorStore {
         return "refused";
       }
     },
-    [project, name],
+    [project, name, setDocument],
   );
 
   // A rename keeps the document's durable id, body, and revision, so the open editor only has to
@@ -169,10 +186,9 @@ export function useScratchpadEditor(project: number): ScratchpadEditorStore {
 
   return {
     name,
-    initialBody,
+    document,
     baseRevision,
     mountKey,
-    loading,
     conflict,
     error,
     open,

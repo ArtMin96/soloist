@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { DETAIL_DONE_ATTRIBUTE } from "@/components/common/DetailPane";
 import { TodoBoard } from "@/components/orchestration/TodoBoard";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { UNLINKED_GROUP_LABEL } from "@/store/todoGrouping";
@@ -135,29 +136,29 @@ function rerenderBoard(
 
 /** The board's group headers, in render order, read off the handle that carries the label itself. */
 function groupLabels(): string[] {
-  return [...document.querySelectorAll("[data-todo-group]")].map(
-    (header) => header.getAttribute("data-todo-group") ?? "",
+  return [...document.querySelectorAll("[data-group]")].map(
+    (header) => header.getAttribute("data-group") ?? "",
   );
 }
 
 /** Which panel the board is showing — the route, not merely which panel is mounted. */
 function route(): string | null {
-  return document.querySelector("[data-todo-route]")?.getAttribute("data-todo-route") ?? null;
+  return document.querySelector("[data-panel-route]")?.getAttribute("data-panel-route") ?? null;
 }
 
 function panel(name: "list" | "detail"): HTMLElement {
-  return document.querySelector<HTMLElement>(`[data-todo-panel="${name}"]`) as HTMLElement;
+  return document.querySelector<HTMLElement>(`[data-panel="${name}"]`) as HTMLElement;
 }
 
 /** The card that opens todo `id` — the same handle the end-to-end walks aim at. */
 function card(id: number): HTMLElement {
   return document.querySelector<HTMLElement>(
-    `[data-todo-id="${id}"] [data-todo-trigger]`,
+    `[data-todo-id="${id}"] [data-card-trigger]`,
   ) as HTMLElement;
 }
 
 function backButton(): HTMLElement {
-  return panel("detail").querySelector<HTMLElement>("[data-todo-back]") as HTMLElement;
+  return panel("detail").querySelector<HTMLElement>("[data-detail-back]") as HTMLElement;
 }
 
 function searchBox(): HTMLInputElement {
@@ -270,7 +271,7 @@ describe("TodoBoard", () => {
   it("renders exactly one toolbar and no second filter strip", () => {
     board();
 
-    expect(document.querySelectorAll("[data-todo-toolbar]")).toHaveLength(1);
+    expect(document.querySelectorAll("[data-board-toolbar]")).toHaveLength(1);
   });
 
   it("hides New todo from the toolbar while the create form is open", () => {
@@ -344,13 +345,13 @@ describe("TodoBoard", () => {
     board();
 
     fireEvent.click(card(1));
-    expect(panel("detail").querySelector("[data-todo-done]")).toBeTruthy();
+    expect(panel("detail").querySelector(`[${DETAIL_DONE_ATTRIBUTE}]`)).toBeTruthy();
 
     fireEvent.click(backButton());
     fireEvent.click(card(1));
 
     // Re-opening starts from the read view: an unsaved draft never outlives the panel showing it.
-    expect(panel("detail").querySelector("[data-todo-done]")).toBeNull();
+    expect(panel("detail").querySelector(`[${DETAIL_DONE_ATTRIBUTE}]`)).toBeNull();
     expect(within(panel("detail")).getByRole("button", { name: /Edit/ })).toBeTruthy();
   });
 

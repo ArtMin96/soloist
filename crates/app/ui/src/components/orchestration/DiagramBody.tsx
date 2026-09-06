@@ -1,5 +1,6 @@
 import { useState, type KeyboardEvent } from "react";
 import { Check, CircleCheck, TriangleAlert } from "lucide-react";
+import { AutosaveStatus } from "@/components/editor/AutosaveStatus";
 import { DiagramCanvas } from "@/components/mermaid/DiagramCanvas";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -39,8 +40,6 @@ export function DiagramBody({ source, onChange, saving, dirty, onFlush }: Diagra
     }
   }
 
-  const status = saving ? "Saving…" : dirty ? "Unsaved changes" : "Saved";
-
   return (
     <div className="@container/diagram flex min-h-0 flex-1 flex-col gap-2 p-3">
       <div className="flex min-h-0 flex-1 flex-col gap-2 @2xl/diagram:flex-row">
@@ -62,13 +61,7 @@ export function DiagramBody({ source, onChange, saving, dirty, onFlush }: Diagra
 
       <footer className="flex shrink-0 items-center gap-3">
         <Validity valid={valid} />
-        <span
-          className="text-[0.6875rem] text-muted-foreground"
-          aria-live="polite"
-          data-autosave-status
-        >
-          {status}
-        </span>
+        <AutosaveStatus saving={saving} dirty={dirty} />
         <div className="flex-1" />
         <Button size="sm" onClick={onFlush} disabled={saving || !dirty} data-diagram-save>
           {saving ? "Saving…" : <Check aria-hidden />}

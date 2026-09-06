@@ -40,6 +40,14 @@
   padding: 0;
 }
 
+/* Only the blocks in view are laid out, so a long note's cost stops scaling with its height. Scoped
+ * to the read-only rendering on purpose: the editable surface's find highlights and outline rail
+ * read geometry from every block, including the ones off screen. */
+.tiptap-shell--plain .tiptap-body > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 1.5em;
+}
+
 .tiptap-toolbar {
   display: flex;
   align-items: center;
@@ -68,7 +76,9 @@
   outline: none;
   font-size: 0.8125rem;
   line-height: 1.55;
-  letter-spacing: var(--tracking-body);
+  /* Prose sets no tracking, and says so explicitly: a surface nested in a panel that carries the
+   * body tracking would otherwise inherit it. */
+  letter-spacing: normal;
   color: var(--foreground);
 }
 
