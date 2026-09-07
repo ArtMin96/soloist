@@ -224,7 +224,6 @@ function secondaryActions({
       icon: Link2,
       label: "Copy link to scratchpad",
       menuLabel: "Copy link to scratchpad",
-      iconOnly: true,
       onSelect: onCopyLink,
       disabled,
     },

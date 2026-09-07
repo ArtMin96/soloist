@@ -15,10 +15,11 @@ interface TagFilterChipsProps {
 // `aria-checked`/`role="radio"`, and type="multiple" would misrepresent an at-most-one selection as
 // an independent multi-select.
 export function TagFilterChips({ tags, active, onToggle }: TagFilterChipsProps) {
-  if (tags.length === 0) return null;
+  const visibleTags = active !== null && !tags.includes(active) ? [active, ...tags] : tags;
+  if (visibleTags.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-1" role="group" aria-label="Filter by tag">
-      {tags.map((tag) => {
+      {visibleTags.map((tag) => {
         const isActive = active === tag;
         return (
           <Toggle

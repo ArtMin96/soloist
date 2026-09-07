@@ -23,16 +23,20 @@ interface CardRowProps {
  */
 export function CardRow({ onOpen, children, aside }: CardRowProps) {
   return (
-    <Card {...{ [CARD_ROW_ATTRIBUTE]: "" }} size="sm" className="w-full gap-0 rounded-lg py-0">
+    <Card
+      {...{ [CARD_ROW_ATTRIBUTE]: "" }}
+      size="sm"
+      className="w-full min-w-0 gap-0 rounded-lg border border-border py-0 ring-0"
+    >
       {/* The card's own button and the aside are siblings, not nested — a row never buries an
           interactive control inside another one, so each is its own tab stop. */}
-      <CardContent className="flex items-stretch gap-0 p-0">
+      <CardContent className="flex items-center gap-0 p-0">
         <Button
           type="button"
           {...{ [CARD_TRIGGER_ATTRIBUTE]: "" }}
           variant="ghost"
           onClick={onOpen}
-          className="h-auto min-w-0 flex-1 flex-col items-stretch gap-1.5 overflow-hidden rounded-none px-2 py-1.5 text-left whitespace-normal active:not-aria-[haspopup]:scale-100 focus-visible:ring-inset"
+          className="h-auto min-w-0 flex-1 cursor-pointer flex-col items-stretch gap-1.5 overflow-hidden rounded-none p-3 text-left whitespace-normal hover:border-transparent hover:bg-sidebar-row-hover hover:[box-shadow:none] active:bg-sidebar-row-active active:not-aria-[haspopup]:scale-100 focus-visible:bg-sidebar-row-hover focus-visible:ring-inset supports-backdrop-filter:hover:bg-sidebar-row-hover supports-backdrop-filter:hover:backdrop-blur-none supports-backdrop-filter:hover:backdrop-saturate-100 motion-reduce:transition-none [&>*]:min-w-0"
         >
           {children}
         </Button>
@@ -48,8 +52,8 @@ export function CardRow({ onOpen, children, aside }: CardRowProps) {
  */
 export function CardRowStandIn({ children }: { children: ReactNode }) {
   return (
-    <Card size="sm" className="w-full gap-0 rounded-lg py-0">
-      <CardContent className="flex flex-col gap-1.5 px-2 py-1.5">{children}</CardContent>
+    <Card size="sm" className="w-full min-w-0 gap-0 rounded-lg border border-border py-0 ring-0">
+      <CardContent className="flex min-w-0 flex-col gap-1.5 p-3">{children}</CardContent>
     </Card>
   );
 }

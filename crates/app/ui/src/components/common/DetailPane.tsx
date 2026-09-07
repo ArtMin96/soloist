@@ -51,12 +51,8 @@ export const LABEL_FLOOR = "@max-[12rem]/detail-header:sr-only";
 export const SQUARE_FLOOR =
   "@max-[12rem]/detail-header:size-7 @max-[12rem]/detail-header:justify-center @max-[12rem]/detail-header:gap-0 @max-[12rem]/detail-header:p-0";
 
-/**
- * Below this the secondary actions stop being rendered inline and become menu items instead. The
- * cluster and the trigger are mutually exclusive rather than both-rendered-one-hidden, so an action
- * is never two tab stops.
- */
-export const INLINE_ABOVE = "@max-[15rem]/detail-header:hidden";
+/** Secondary actions are hidden below 15rem and shown inline from 15rem upward. */
+export const INLINE_ABOVE = "hidden @min-[15rem]/detail-header:flex";
 
 /** The overflow trigger's half of the exchange `INLINE_ABOVE` describes. */
 export const MENU_BELOW = "@min-[15rem]/detail-header:hidden";
@@ -134,10 +130,7 @@ export function DetailBackButton({
       size="sm"
       onClick={onClick}
       aria-label={`Back to ${destination}`}
-      className={cn(
-        "-ml-2.5 min-w-0 text-muted-foreground @max-[20rem]/detail-header:ml-0",
-        SQUARE_WIDE,
-      )}
+      className={cn("min-w-0 text-muted-foreground", SQUARE_WIDE)}
     >
       <ChevronLeft aria-hidden data-icon="inline-start" />
       {/* Names the destination, which is what a back control in a two-panel board should say. */}

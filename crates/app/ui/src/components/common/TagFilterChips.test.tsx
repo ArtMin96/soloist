@@ -48,6 +48,19 @@ describe("TagFilterChips", () => {
     expect(screen.getByRole("button", { name: "beta" }).getAttribute("aria-pressed")).toBe("true");
   });
 
+  it("keeps a selected tag available to clear when it leaves the available tags", () => {
+    const { rerender } = render(<Harness tags={["alpha", "beta"]} />);
+    fireEvent.click(screen.getByRole("button", { name: "alpha" }));
+
+    rerender(<Harness tags={[]} />);
+
+    const stale = screen.getByRole("button", { name: "alpha" });
+    expect(stale.getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(stale);
+    expect(screen.queryByRole("button", { name: "alpha" })).toBeNull();
+  });
+
   it("only applies the hover background to the inactive chip, never the pressed one", () => {
     render(<TagFilterChips tags={["alpha", "beta"]} active="beta" onToggle={vi.fn()} />);
     const inactive = screen.getByRole("button", { name: "alpha" });

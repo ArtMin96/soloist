@@ -9,6 +9,37 @@
 
 ## Current state
 
+> **NEWEST (2026-09-07): SHARED TODO/SCRATCHPAD DETAIL + CARD POLISH — `Done — pending verify`,
+> uncommitted on `feat/todo-workspace-ux` (PR #200).** The shared components now give both detail
+> surfaces the same compact, native-feeling treatment: the Back control aligns with the overview
+> gutter instead of hanging outside the pane; secondary actions are consistent icon controls with
+> subject-specific tooltips; their vertical separator is centered in one fixed-height action band;
+> and the narrow-pane overflow swap has no gap at the 15rem boundary. `CollapsibleGroup` now has a
+> clear disclosure affordance, connecting rule and count badge, while `CardRow` has roomier geometry
+> plus restrained hover, active and keyboard-focus feedback shared by todo and scratchpad items.
+>
+> The same pass kept the common kit behaviorally sound: a panel's bounded settle fallback invokes
+> the same one-shot completion path as `transitionend`, fallback focus is visible, result-count
+> changes are announced, stale tag filters remain clearable, and the board skeleton matches the
+> loaded toolbar geometry.
+>
+> **Evidence.** Ten relevant Vitest files passed, **119 tests / 119**; TypeScript, scoped ESLint,
+> Prettier and `git diff --check` passed. The Impeccable detector reported no findings. React Doctor
+> scored **79/100 branch-wide** with no findings in the scoped production components. A real-window
+> visual pass was not run because the lightweight harness does not expose the todo or scratchpad
+> detail surfaces.
+>
+> **Status.** This common-component polish checkpoint is `Done — pending verify`; overall Phase 11
+> remains **In progress** and PR #200 remains uncommitted. No phase or parity row is promoted by this
+> visual refinement alone.
+>
+> **Open thread.** Visual acceptance is still owed for the exact surfaces changed here.
+>
+> **Next session should start with:** run `just dev-alongside`, open both a todo and a scratchpad from
+> their overviews, and verify the Back gutter, centered separator, wide/narrow action swap, grouped
+> scratchpad disclosure/count treatment, and card hover/focus/active states in a real WebKitGTK
+> window. Then commit the coherent `feat/todo-workspace-ux` change set and update PR #200.
+
 > **NEWEST (2026-09-06): SCRATCHPAD BOARD ON A SHARED MASTER–DETAIL KIT + AN INBOUND-NAVIGATION
 > REGRESSION FIXED + A DETAIL-OPEN PERF PASS THAT DID NOT FIX THE LAG — UI `Done — pending verify`,
 > perf explicitly unresolved; uncommitted on `feat/todo-workspace-ux` (PR #200) except the e2e

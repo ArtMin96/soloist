@@ -2,12 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { Link2, Pencil } from "lucide-react";
-import {
-  DetailActions,
-  MENU_TRIGGER_LABEL,
-  type DetailAction,
-} from "@/components/common/DetailActions";
-import { INLINE_ABOVE, MENU_BELOW } from "@/components/common/DetailPane";
+import { DetailActions, type DetailAction } from "@/components/common/DetailActions";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -28,7 +23,6 @@ const copyLink = (overrides: Partial<DetailAction> = {}) =>
     icon: Link2,
     label: "Copy link to todo",
     menuLabel: "Copy link to todo",
-    iconOnly: true,
     ...overrides,
   });
 
@@ -46,7 +40,7 @@ function cluster({
   );
 }
 
-const menuTrigger = () => screen.getByRole("button", { name: MENU_TRIGGER_LABEL });
+const menuTrigger = () => screen.getByRole("button", { name: "More todo actions" });
 
 function openMenu() {
   fireEvent.pointerDown(menuTrigger(), { button: 0, ctrlKey: false });
@@ -55,16 +49,23 @@ function openMenu() {
 const separator = () => document.querySelector('[data-slot="separator"]');
 
 describe("DetailActions", () => {
-  // Below a 15rem container the secondary actions become menu items. Both forms exist in the DOM
-  // under mutually exclusive container queries, so exactly one of them is ever reachable — jsdom
-  // applies no CSS, which is why this asserts the queries rather than the visibility.
-  it("offers the secondary actions inline or in a menu, never as two live copies", () => {
+  it("hands secondary actions from the menu to the inline cluster at 15rem", () => {
     cluster();
 
     const inline = screen.getByRole("button", { name: "Edit" }).parentElement as HTMLElement;
 
-    expect(inline.className).toContain(INLINE_ABOVE);
-    expect(menuTrigger().className).toContain(MENU_BELOW);
+    expect(inline.classList.contains("hidden")).toBe(true);
+    expect(inline.classList.contains("@min-[15rem]/detail-header:flex")).toBe(true);
+    expect(menuTrigger().classList.contains("@min-[15rem]/detail-header:hidden")).toBe(true);
+  });
+
+  it("uses the subject-specific tooltip as the overflow control's name", async () => {
+    cluster();
+
+    const trigger = menuTrigger();
+    fireEvent.focus(trigger);
+
+    expect((await screen.findByRole("tooltip")).textContent).toBe("More todo actions");
   });
 
   it("names an action by its full phrase in the menu, and runs it from there", async () => {
@@ -83,7 +84,10 @@ describe("DetailActions", () => {
   it("rules the secondary actions off from the primary control", () => {
     cluster({ primary: <Button size="sm">Complete</Button> });
 
-    expect(separator()).not.toBeNull();
+    const rule = separator() as HTMLElement;
+    expect(rule).not.toBeNull();
+    expect(rule.className).toContain("self-center");
+    expect(rule.parentElement?.className).toContain("items-center");
   });
 
   it("draws no rule when the subject offers no primary action", () => {
@@ -93,11 +97,17 @@ describe("DetailActions", () => {
     expect(separator()).toBeNull();
   });
 
-  it("names an icon-only action and explains it when it takes focus", async () => {
+  it("presents every secondary action as an equally compact named control", async () => {
     cluster();
 
+    const edit = screen.getByRole("button", { name: "Edit" });
     const copy = screen.getByRole("button", { name: "Copy link to todo" });
+    expect(edit.textContent).toBe("");
     expect(copy.textContent).toBe("");
+
+    fireEvent.focus(edit);
+
+    expect((await screen.findByRole("tooltip")).textContent).toBe("Edit");
 
     fireEvent.focus(copy);
 

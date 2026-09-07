@@ -64,12 +64,14 @@ export function BoardToolbar({
           />
         </InputGroup>
         {facets}
-        <span
+        <output
           {...{ [BOARD_COUNT_ATTRIBUTE]: "" }}
+          aria-live="polite"
+          aria-atomic="true"
           className="type-label shrink-0 text-muted-foreground"
         >
           {shown} of {total}
-        </span>
+        </output>
         {primary}
       </div>
       <TagFilterChips tags={tags} active={tag} onToggle={onTagChange} />

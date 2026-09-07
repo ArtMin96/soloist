@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { useLatestRef } from "@/store/useLatestRef";
 import { PanelSettledContext } from "@/store/panelSettledContext";
 
 /** Which of the two panels is on screen. */
@@ -16,7 +17,7 @@ export const PANEL_ATTRIBUTE = "data-panel";
 // property and expands `transition-transform` to `transform, translate, scale, rotate`, so the event
 // arrives named `translate` — measured in WebKitGTK, where computed `transform` stays `none`. Both
 // names are accepted so a build that compiles the class the other way cannot silently stop settling;
-// settling twice is harmless, because dropping what the consumer retained is idempotent.
+// they converge on one guarded completion path so one movement still settles only once.
 const SETTLE_PROPERTIES = new Set(["transform", "translate"]);
 
 /** The token the track's arrival is timed by, and so the floor for waiting the movement out. */
@@ -81,30 +82,41 @@ export function SlidingPanels({ showing, list, detail, onSettled, className }: S
   // would publish one frame in which the panel claimed to have already arrived.
   const [route, setRoute] = useState(showing);
   const [settled, setSettled] = useState(true);
+  const pendingRouteRef = useRef<SlidingPanel | null>(showing);
+  const onSettledRef = useLatestRef(onSettled);
   if (route !== showing) {
     setRoute(showing);
     setSettled(false);
   }
 
+  useLayoutEffect(() => {
+    if (!settled) pendingRouteRef.current = route;
+  }, [route, settled]);
+
+  const completeSettle = useCallback(() => {
+    if (pendingRouteRef.current !== route) return;
+    pendingRouteRef.current = null;
+    setSettled(true);
+    onSettledRef.current();
+  }, [onSettledRef, route]);
+
   // `transitionend` is the movement's own signal, but nothing guarantees one arrives: a route can
   // change with no transition running at all, and an interrupted transition never reports. Two
   // frames give a real movement the chance to start, and the duration it is timed by bounds the
-  // rest. Only the published signal is released this way — the consumer's `onSettled` still waits
-  // for the event itself, because releasing what it retained early would blank a panel that is
-  // still on screen.
+  // rest. A route change restarts the bounded wait even when the preceding movement had not settled.
   useEffect(() => {
     if (settled) return;
     let timer = 0;
     let frame = requestAnimationFrame(() => {
       frame = requestAnimationFrame(() => {
-        timer = window.setTimeout(() => setSettled(true), settleCeiling());
+        timer = window.setTimeout(completeSettle, settleCeiling());
       });
     });
     return () => {
       cancelAnimationFrame(frame);
       clearTimeout(timer);
     };
-  }, [settled]);
+  }, [completeSettle, settled]);
 
   // `clip`, never `hidden`: a hidden box is still programmatically scrollable, and anything
   // reaching into a panel that has not arrived yet — a `scrollIntoView`, a focus — scrolls the
@@ -130,8 +142,7 @@ export function SlidingPanels({ showing, list, detail, onSettled, className }: S
           onTransitionEnd={(event) => {
             // Content inside a panel animates too, and those transitions bubble through the track.
             if (event.target === event.currentTarget && SETTLE_PROPERTIES.has(event.propertyName)) {
-              setSettled(true);
-              onSettled();
+              completeSettle();
             }
           }}
         >
@@ -167,7 +178,7 @@ function Panel({
       inert={inert}
       tabIndex={-1}
       className={cn(
-        "flex h-full w-full min-h-0 shrink-0 flex-col outline-none",
+        "flex h-full w-full min-h-0 shrink-0 flex-col outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
         // A panel off screen is skipped for layout and paint, so a long list stops being measured
         // every time the panel beside it forces layout — but only once the track has stopped, since
         // for the length of the movement both panels are on screen, half a viewport each, and

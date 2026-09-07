@@ -63,15 +63,25 @@ describe("CardRow", () => {
   it("uses one flush, geometry-stable surface for the row's action", () => {
     row();
 
+    const card = document.querySelector(`[${CARD_ROW_ATTRIBUTE}]`) as HTMLElement;
     const content = document.querySelector('[data-slot="card-content"]') as HTMLElement;
-    expect(document.querySelector(`[${CARD_ROW_ATTRIBUTE}]`)?.getAttribute("data-slot")).toBe(
-      "card",
-    );
+    expect(card.getAttribute("data-slot")).toBe("card");
+    expect(card.className).toContain("border-border");
+    expect(card.className).toContain("ring-0");
     expect(content.className).toContain("p-0");
     expect(content.className).toContain("gap-0");
+    expect(content.className).toContain("items-center");
     expect(trigger().className).toContain("rounded-none");
+    expect(trigger().className).toContain("p-3");
+    expect(trigger().className).toContain("cursor-pointer");
+    expect(trigger().className).toContain("hover:bg-sidebar-row-hover");
+    expect(trigger().className).toContain("active:bg-sidebar-row-active");
+    expect(trigger().className).toContain("hover:[box-shadow:none]");
+    expect(trigger().className).not.toContain("hover:[box-shadow:var(--glass-control-shadow)]");
+    expect(trigger().className).toContain("supports-backdrop-filter:hover:backdrop-blur-none");
     expect(trigger().className).toContain("active:not-aria-[haspopup]:scale-100");
     expect(trigger().className).toContain("focus-visible:ring-inset");
+    expect(trigger().className).toContain("motion-reduce:transition-none");
   });
 });
 
@@ -85,6 +95,7 @@ describe("CardRowStandIn", () => {
 
     expect(document.querySelector('[data-slot="card"]')).not.toBeNull();
     expect(screen.getByText("stand-in")).toBeTruthy();
+    expect(document.querySelector('[data-slot="card-content"]')?.className).toContain("p-3");
     expect(document.querySelector("button")).toBeNull();
     expect(document.querySelector(`[${CARD_TRIGGER_ATTRIBUTE}]`)).toBeNull();
   });

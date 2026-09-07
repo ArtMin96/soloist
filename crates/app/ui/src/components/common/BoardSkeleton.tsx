@@ -32,6 +32,8 @@ export function BoardSkeleton({ facets, rows, row }: BoardSkeletonProps) {
         <div className="flex flex-wrap items-center gap-2">
           <Skeleton className="h-7 min-w-32 flex-1 basis-40" />
           {facets}
+          <Skeleton className="h-3.5 w-12 shrink-0" />
+          <Skeleton className="h-7 w-24 shrink-0" />
         </div>
       </div>
 

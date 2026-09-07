@@ -27,7 +27,6 @@ export function TodoActions({ done, busy, onComplete, onCopyLink, onStartEdit }:
           label: "Copy link to todo",
           menuLabel: "Copy link to todo",
           onSelect: onCopyLink,
-          iconOnly: true,
         },
       ]}
       menuTooltip="More todo actions"

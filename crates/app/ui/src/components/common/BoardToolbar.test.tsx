@@ -39,7 +39,7 @@ function Harness({ tags = [] }: { tags?: string[] }) {
       subject="scratchpads"
       search={search}
       onSearchChange={setSearch}
-      shown={2}
+      shown={search === "" ? 2 : 1}
       total={5}
       tags={tags}
       tag={tag}
@@ -69,6 +69,17 @@ describe("BoardToolbar", () => {
     toolbar({ shown: 2, total: 5 });
 
     expect(document.querySelector(`[${BOARD_COUNT_ATTRIBUTE}]`)?.textContent).toBe("2 of 5");
+  });
+
+  it("announces a changed result count as one polite status", () => {
+    render(<Harness />);
+    const count = screen.getByRole("status");
+
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "gate" } });
+
+    expect(count.textContent).toBe("1 of 5");
+    expect(count.getAttribute("aria-live")).toBe("polite");
+    expect(count.getAttribute("aria-atomic")).toBe("true");
   });
 
   it("sets the board's facet controls between the searchbox and the count", () => {

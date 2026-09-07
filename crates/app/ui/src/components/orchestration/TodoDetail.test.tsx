@@ -264,17 +264,15 @@ describe("TodoDetail", () => {
     expect((await screen.findByRole("tooltip")).textContent).toBe("Copy link to todo");
   });
 
-  // Below a 15rem container the two secondary actions become menu items. Both forms exist in the
-  // DOM under mutually exclusive container queries, so exactly one of them is ever reachable —
-  // jsdom applies no CSS, which is why this asserts the queries rather than the visibility.
   it("offers the secondary actions inline or in a menu, never as two live copies", () => {
     panel();
 
     const inline = within(header()).getByRole("button", { name: "Edit" })
       .parentElement as HTMLElement;
-    const menu = within(header()).getByRole("button", { name: "More actions" });
+    const menu = within(header()).getByRole("button", { name: "More todo actions" });
 
-    expect(inline.className).toContain("@max-[15rem]/detail-header:hidden");
+    expect(inline.className).toContain("hidden");
+    expect(inline.className).toContain("@min-[15rem]/detail-header:flex");
     expect(menu.className).toContain("@min-[15rem]/detail-header:hidden");
   });
 

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { useEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { DETAIL_BACK_ATTRIBUTE } from "@/components/common/DetailPane";
 import { SlidingPanels, type SlidingPanel } from "@/components/common/SlidingPanels";
 import { MarkdownView } from "@/components/editor/MarkdownView";
@@ -39,7 +39,7 @@ function renderPanels(showing: SlidingPanel, onSettled = () => {}) {
 
 const track = (container: HTMLElement) => container.querySelector("[data-panel-route] > div")!;
 const panel = (container: HTMLElement, name: SlidingPanel) =>
-  container.querySelector(`[data-panel="${name}"]`)!;
+  container.querySelector<HTMLElement>(`[data-panel="${name}"]`)!;
 
 describe("SlidingPanels", () => {
   it("holds the off-screen panel inert, and flips it with the route", () => {
@@ -74,6 +74,52 @@ describe("SlidingPanels", () => {
     expect(onSettled).toHaveBeenCalledTimes(1);
   });
 
+  it("settles once through the fallback when no transition event arrives", () => {
+    const frames: FrameRequestCallback[] = [];
+    let timeout: (() => void) | undefined;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const timeoutSpy = vi.spyOn(window, "setTimeout").mockImplementation((callback) => {
+      timeout = callback;
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    });
+
+    try {
+      const onSettled = vi.fn();
+      const { container, rerender } = renderPanels("list", onSettled);
+      rerender(<SlidingPanels showing="detail" list={null} detail={null} onSettled={onSettled} />);
+
+      act(() => frames.shift()?.(0));
+      act(() => frames.shift()?.(0));
+      act(() => timeout?.());
+
+      expect(onSettled).toHaveBeenCalledTimes(1);
+
+      fireEvent.transitionEnd(track(container), { propertyName: "translate" });
+      expect(onSettled).toHaveBeenCalledTimes(1);
+    } finally {
+      timeoutSpy.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("settles once per route change when the browser emits multiple movement properties", () => {
+    const onSettled = vi.fn();
+    const { container, rerender } = renderPanels("list", onSettled);
+
+    rerender(<SlidingPanels showing="detail" list={null} detail={null} onSettled={onSettled} />);
+    fireEvent.transitionEnd(track(container), { propertyName: "translate" });
+    fireEvent.transitionEnd(track(container), { propertyName: "transform" });
+    expect(onSettled).toHaveBeenCalledTimes(1);
+
+    rerender(<SlidingPanels showing="list" list={null} detail={null} onSettled={onSettled} />);
+    fireEvent.transitionEnd(track(container), { propertyName: "translate" });
+    expect(onSettled).toHaveBeenCalledTimes(2);
+  });
+
   it("ignores a transition that bubbled up from inside a panel", () => {
     const onSettled = vi.fn();
     const { container } = renderPanels("detail", onSettled);
@@ -95,6 +141,18 @@ describe("SlidingPanels", () => {
     expect(container.querySelector("[data-panel-route]")!.getAttribute("data-panel-route")).toBe(
       "list",
     );
+  });
+
+  it("keeps programmatic panel focus visible for keyboard users", () => {
+    const { container } = renderPanels("list");
+    const listPanel = panel(container, "list");
+
+    listPanel.focus();
+
+    expect(document.activeElement).toBe(listPanel);
+    expect(listPanel.className).toContain("focus-visible:ring-2");
+    expect(listPanel.className).toContain("focus-visible:ring-inset");
+    expect(listPanel.className).toContain("focus-visible:ring-ring");
   });
 });
 
