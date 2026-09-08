@@ -1,4 +1,4 @@
-import type { ProcStatus } from "@domain";
+import type { DocumentRole, ProcStatus } from "@domain";
 import { $, browser } from "@wdio/globals";
 import { waitUntilOr } from "../harness/waitUntilOr.js";
 import { WAIT } from "../harness/waits.js";
@@ -13,6 +13,12 @@ const META = '[data-testid="process-meta"]';
 // The travelling highlight a working agent's name wears. Kept here rather than with the markers
 // every process row shares: the orchestration tree renders the same rows and never sweeps them.
 const SWEEP = ':scope > span [data-slot="text-shimmer"]';
+// The Todos and Scratchpads groups under a project: the coordination documents its live processes
+// hold or touched this run. Rows are plain buttons, never treeitems, so the arrow-key walk over
+// process rows never lands on one; a spec reaches them by click.
+const DOCUMENT_SECTION = "data-document-section";
+const DOCUMENT_ROW = "[data-document-row]";
+const DOCUMENT_ROLE = "data-document-role";
 
 // The indicator only ever swaps `data-status` out for `data-activity` while the process is
 // Running (a stopped agent has no activity to report), so an activity marker *is* a Running
@@ -44,6 +50,34 @@ export interface RowHandle {
   port: number | null;
   /** Whether the row wears the unread marker — something happened here nobody has looked at. */
   unread: boolean;
+}
+
+/** Which document group under a project a row belongs to — the group's own section handle. */
+export type DocumentSection = "todos" | "scratchpads";
+
+// Both groups name a row by the durable id the core gave the document — the identity every route
+// to it carries, not the prose the row dresses it in — each under its own attribute, so a todo's
+// id and a scratchpad's can never be read for one another.
+const DOCUMENT_HANDLE: Record<DocumentSection, string> = {
+  todos: "data-document-todo",
+  scratchpads: "data-document-scratchpad",
+};
+
+/** One document row as a sidebar group renders it. */
+export interface DocumentRowHandle {
+  /** The document's durable id, as its row attribute carries it. */
+  handle: string;
+  /** The strongest role any live participant holds on the document. */
+  role: DocumentRole;
+  /** The row's visible text. */
+  text: string;
+}
+
+/** What one document row's DOM carries, before the handle and role are checked for presence. */
+interface DocumentRowSnapshot {
+  handle: string | null;
+  role: string | null;
+  text: string;
 }
 
 /** The highlight travelling across a working agent's name, as the window has laid it out. */
@@ -559,6 +593,122 @@ export const sidebar = {
       );
     }
     return marked;
+  },
+
+  /**
+   * Every row a document group currently renders, read in one pass — the groups re-render as the
+   * core's session record and the todo list change, so a row-at-a-time read could tear the same
+   * way a process-row read would.
+   *
+   * A group with nothing in it is not rendered at all, so an empty list is a legitimate read; a
+   * missing project tree is not, and throws rather than reporting "no rows" — otherwise a window
+   * whose shell had gone would satisfy every negative assertion below. A row that carries no role
+   * or no handle likewise throws: the markup changed, and a defaulted value could only ever match
+   * or miss by accident.
+   */
+  async documentRows(section: DocumentSection): Promise<DocumentRowHandle[]> {
+    const snapshots: DocumentRowSnapshot[] | null = await browser.execute(
+      (
+        nav: string,
+        sectionAttr: string,
+        which: string,
+        row: string,
+        handleAttr: string,
+        roleAttr: string,
+      ) => {
+        const tree = document.querySelector(nav);
+        if (!tree) return null;
+        return [
+          ...tree.querySelectorAll(`[${sectionAttr}="${which}"] ${row}`),
+        ].map((node) => ({
+          handle: node.getAttribute(handleAttr),
+          role: node.getAttribute(roleAttr),
+          text: node.textContent?.trim() ?? "",
+        }));
+      },
+      NAV,
+      DOCUMENT_SECTION,
+      section,
+      DOCUMENT_ROW,
+      DOCUMENT_HANDLE[section],
+      DOCUMENT_ROLE,
+    );
+    if (snapshots === null) {
+      throw new Error(
+        `the project tree is not rendered — the harness cannot read the ${section} group`,
+      );
+    }
+    return snapshots.map(({ handle, role, text }) => {
+      if (handle === null || role === null) {
+        throw new Error(
+          `a ${section} row (${JSON.stringify(text)}) renders no ${
+            handle === null ? DOCUMENT_HANDLE[section] : DOCUMENT_ROLE
+          } — the document-row markup changed and the harness can no longer read it`,
+        );
+      }
+      // Written from the typed `DocumentRole` the UI renders, so the string is trusted rather than
+      // re-validated against a second copy of the enum's values.
+      return { handle, role: role as DocumentRole, text };
+    });
+  },
+
+  /**
+   * Waits until the group lists `handle` at `role`, then returns that row. The role is the core's
+   * own derivation over the process's lock and recorded tool accesses, so a row arriving at the
+   * wrong role is a wrong answer, not a slow one — the wait only ends on the exact pair.
+   */
+  async waitForDocumentRole(
+    section: DocumentSection,
+    handle: string,
+    role: DocumentRole,
+  ): Promise<DocumentRowHandle> {
+    let found: DocumentRowHandle | undefined;
+    let seen: DocumentRowHandle[] = [];
+    await waitUntilOr(
+      async () => {
+        seen = await this.documentRows(section);
+        found = seen.find((row) => row.handle === handle && row.role === role);
+        return found !== undefined;
+      },
+      () =>
+        `the ${section} group never listed ${JSON.stringify(handle)} as ${role}; rendered rows: ${JSON.stringify(seen)}`,
+    );
+    return found as DocumentRowHandle;
+  },
+
+  /** Waits until the group no longer lists `handle` at all, whatever role it last wore. */
+  async waitForDocumentGone(section: DocumentSection, handle: string): Promise<void> {
+    let seen: DocumentRowHandle[] = [];
+    await waitUntilOr(
+      async () => {
+        seen = await this.documentRows(section);
+        return !seen.some((row) => row.handle === handle);
+      },
+      () =>
+        `the ${section} group never dropped ${JSON.stringify(handle)}; rendered rows: ${JSON.stringify(seen)}`,
+    );
+  },
+
+  /** Waits until the group lists nothing — what is left once no live process holds or touched any of it. */
+  async waitForNoDocuments(section: DocumentSection): Promise<void> {
+    let seen: DocumentRowHandle[] = [];
+    await waitUntilOr(
+      async () => {
+        seen = await this.documentRows(section);
+        return seen.length === 0;
+      },
+      () =>
+        `the ${section} group never emptied; rendered rows: ${JSON.stringify(seen)}`,
+    );
+  },
+
+  /** Activates the row for `handle` — the way a user opens that document from the sidebar. */
+  async openDocument(section: DocumentSection, handle: string): Promise<void> {
+    const row = $(NAV).$(
+      `[${DOCUMENT_SECTION}="${section}"] ${DOCUMENT_ROW}[${DOCUMENT_HANDLE[section]}="${handle}"]`,
+    );
+    await row.waitForClickable({ timeout: WAIT.render });
+    await row.click();
   },
 
   /** Shows a project's orchestration pane, chosen from the project's own ••• menu. */

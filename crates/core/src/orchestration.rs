@@ -13,8 +13,8 @@ use serde::Serialize;
 
 use crate::agents::AgentActivity;
 use crate::coordination::{
-    AccessKind, AgentMessageRecord, DiagramSummary, KvEntry, LeaseView, ScratchpadSummary,
-    TimerView, TodoStatus, TodoView,
+    AgentMessageRecord, DiagramSummary, KvEntry, LeaseView, ScratchpadSummary, TimerView,
+    TodoStatus, TodoView,
 };
 use crate::ids::{ProcessId, ProjectId, ScratchpadId, TodoId};
 use crate::process::{ProcStatus, ProcessKind};
@@ -85,38 +85,51 @@ pub struct OrchestrationSnapshot {
     pub messages: Vec<AgentMessageRecord>,
 }
 
-/// One todo in a [`SessionWork`] read: enough for the agent terminal header to name it and say
-/// what the process did with it, without the full board's document.
+/// How one live process is engaged with a coordination document this run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentRole {
+    /// Holds the todo's lock — the document was picked up to be implemented.
+    Implementing,
+    /// Wrote the document through a tool this run without holding its lock.
+    Editing,
+    /// Read the document through a tool this run.
+    Reading,
+}
+
+/// One live process's engagement with a coordination document, named so the surface can say who.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct SessionTodo {
+pub struct DocumentParticipant {
+    pub process: ProcessId,
+    /// The process's display label — the same one its sidebar row wears.
+    pub label: String,
+    pub role: DocumentRole,
+}
+
+/// One todo a project's live processes hold or touched this run.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct TodoWork {
     pub id: TodoId,
     pub title: String,
     pub status: TodoStatus,
-    pub blocked: bool,
-    /// True while this process holds the todo's lock — "current work".
-    pub locked: bool,
-    /// How this process last touched it this run; `None` when it holds the lock without having
-    /// read or written it through a tool this run.
-    pub access: Option<AccessKind>,
+    /// Every live process engaged with it, by ascending process id; never empty.
+    pub participants: Vec<DocumentParticipant>,
 }
 
-/// One scratchpad in a [`SessionWork`] read.
+/// One scratchpad a project's live processes touched this run.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct SessionScratchpad {
+pub struct ScratchpadWork {
     pub id: ScratchpadId,
     pub name: String,
-    pub access: AccessKind,
+    /// Every live process engaged with it, by ascending process id; never empty.
+    pub participants: Vec<DocumentParticipant>,
 }
 
-/// The coordination documents one process holds now or touched this run — the agent terminal
-/// header's "current work" / "this session" context. `todos` orders the process's locked todos
-/// first (by id), then its remaining recorded todos in the order it first touched them; a recorded
-/// id with no live document is dropped, so a deleted todo or scratchpad never strands a stale
-/// title in the header.
+/// The coordination documents a project's live processes hold or touched this run, grouped by
+/// document rather than by process, for the sidebar's Todos and Scratchpads groups.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct SessionWork {
-    pub process: ProcessId,
+pub struct ProjectWork {
     pub project: ProjectId,
-    pub todos: Vec<SessionTodo>,
-    pub scratchpads: Vec<SessionScratchpad>,
+    pub todos: Vec<TodoWork>,
+    pub scratchpads: Vec<ScratchpadWork>,
 }

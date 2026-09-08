@@ -1,4 +1,4 @@
-import type { ProcStatus, ProjectView, TodoStatus } from "@domain";
+import type { DocumentRole, ProcStatus, ProjectView, TodoStatus } from "@domain";
 import {
   COORDINATION,
   LEAD_AGENT,
@@ -21,6 +21,12 @@ const RUNNING: ProcStatus = "Running";
 const STOPPED: ProcStatus = "Stopped";
 // The status the lead declared on every todo it created; the blocker gate is derived, not declared.
 const OPEN: TodoStatus = "open";
+const DONE: TodoStatus = "done";
+// The roles the sidebar derives from the lead's lock and recorded tool accesses. Every todo here
+// was *created* by the lead through a tool, which the core records as a write, and a later tool
+// read never downgrades a recorded write — so nothing in this fixture can render as merely read.
+const IMPLEMENTING: DocumentRole = "implementing";
+const EDITING: DocumentRole = "editing";
 
 /**
  * The handle a humanized document name was rendered from — "Release readiness" → "release-readiness".
@@ -36,10 +42,11 @@ const overflowing = (boxes: FitReading[]) =>
 // The todo workspace as a user moves through it, in the real window against the real core: a
 // board row carries the id and blocker count the core computed from a chain built over the wire;
 // a card hands the pane to its detail panel and Back retraces the way in; the row the lead locked
-// names the lead and opens its terminal; that terminal's header lists the lock as current work and
-// the tool reads as this session, and each item leads straight back to the surface holding it; the
-// board's own surface fits the narrowest window the app allows; and stopping the lead empties its
-// context. Every assertion keys on state only the core produced — a lock held by a bound session,
+// names the lead and opens its terminal; the sidebar's Todos and Scratchpads groups list what the
+// lead holds and touched, each at the role the core derived, and each row leads straight to the
+// surface holding that document; the board's own surface fits the narrowest window the app allows;
+// a todo marked done leaves the group while the rest stay; and stopping the lead empties both
+// groups. Every assertion keys on state only the core produced — a lock held by a bound session,
 // an access recorded from a real tool call, a focus the engine really moved.
 describe("the todo workspace", () => {
   let project: ProjectView;
@@ -49,6 +56,10 @@ describe("the todo workspace", () => {
   let locked: number;
   /** The id of the todo the lead read through a tool without locking it. */
   let loaded: number;
+  /** The id of the todo gating the locked one — created by the lead, never read back. */
+  let blocker: number;
+  /** The id of the scratchpad the lead wrote and then read back over the wire. */
+  let scratchpad: number;
 
   before(async () => {
     project = await openProject("orchestration");
@@ -60,6 +71,12 @@ describe("the todo workspace", () => {
     await sidebar.openOrchestration(project.name);
     const [leadNode] = await orchestrationPane.waitForNodes(LEAD);
     lead = leadNode!.id;
+
+    // The scratchpad's id comes from its own board, the way each todo id below comes from the todo
+    // board: the sidebar rows are what this walk checks, so the identity they must carry has to be
+    // read from the surface that owns the document, never from the row under test.
+    await orchestrationPane.showView("scratchpads");
+    scratchpad = await scratchpadBoard.waitForRowId(COORDINATION.scratchpad);
 
     await orchestrationPane.showView("todos");
     await todoBoard.waitForTodo(COORDINATION.blocked);
@@ -75,6 +92,7 @@ describe("the todo workspace", () => {
     expect(row).not.toBeNull();
     locked = row!.id;
     loaded = (await todoBoard.read(COORDINATION.commented))!.id;
+    blocker = (await todoBoard.read(COORDINATION.blocker))!.id;
 
     expect(await todoBoard.todoRef(COORDINATION.blocked)).toBe(`#${locked}`);
     expect(row!.status).toBe(OPEN);
@@ -122,15 +140,30 @@ describe("the todo workspace", () => {
     expect(await terminalPane.isMounted()).toBe(true);
   });
 
-  it("lists the locked todo as current work and what the lead read as this session", async () => {
-    const work = await terminalPane.waitForCurrentTodo(locked);
-    expect(work.currentTodos).toEqual([locked]);
-    expect(work.sessionTodos).toContain(loaded);
-    expect(work.sessionScratchpads).toContain(COORDINATION.scratchpad);
+  it("lists the lead's documents under the project at the roles the core derived", async () => {
+    // Implementing is the lock the lead took over the wire, and only a lock produces it: the wait
+    // ends on the exact pair, so a row painted at any other role is the failure, not a slow read.
+    const row = await sidebar.waitForDocumentRole("todos", String(locked), IMPLEMENTING);
+    expect(row.text).toContain(COORDINATION.blocked);
+
+    // One snapshot of each group, checked whole: the two other todos were created by the lead and
+    // hold no lock, so they are editing — and the one it later read through a tool stays editing,
+    // because a recorded write is never downgraded by a read. The scratchpad was written and then
+    // read, so it carries the same answer for the same reason.
+    const todos = await sidebar.documentRows("todos");
+    expect(Object.fromEntries(todos.map((todo) => [todo.handle, todo.role]))).toEqual({
+      [String(locked)]: IMPLEMENTING,
+      [String(loaded)]: EDITING,
+      [String(blocker)]: EDITING,
+    });
+    const scratchpads = await sidebar.documentRows("scratchpads");
+    expect(scratchpads.map(({ handle, role }) => ({ handle, role }))).toEqual([
+      { handle: String(scratchpad), role: EDITING },
+    ]);
   });
 
-  it("returns from a current-work item to that todo, open and focused", async () => {
-    await terminalPane.openSessionTodo(locked);
+  it("opens that todo from its Todos row, focused", async () => {
+    await sidebar.openDocument("todos", String(locked));
     await todoBoard.waitForTodo(COORDINATION.blocked);
 
     // The inbound half lands on the todo itself, not on a board the reader then has to search: the
@@ -140,9 +173,8 @@ describe("the todo workspace", () => {
     expect(landed.backFocused).toBe(true);
   });
 
-  it("returns from a this-session item to that scratchpad, open and focused", async () => {
-    await sidebar.select(LEAD);
-    await terminalPane.openSessionScratchpad(COORDINATION.scratchpad);
+  it("opens that scratchpad from its Scratchpads row, focused", async () => {
+    await sidebar.openDocument("scratchpads", String(scratchpad));
 
     // The inbound half lands on the document itself, not on a board the reader then has to search:
     // the detail panel opens on it whatever the list's filter and sort happen to be, and focus goes
@@ -168,17 +200,41 @@ describe("the todo workspace", () => {
     expect(overflowing(await todoBoard.detailOverflow())).toEqual([]);
   });
 
-  it("empties the lead's session context when the lead stops", async () => {
-    await sidebar.select(LEAD);
-    await terminalPane.waitForCurrentTodo(locked);
+  it("drops a todo from the group once it is done, keeping the rest", async () => {
+    // Done is the one status the group never lists, however many processes hold or touched the
+    // todo — the lead still holds the lock on the one it completes here. The lead stub has no
+    // complete verb, so the status change is driven through the board's detail panel, which routes
+    // to the same core command; the locked todo is gated by its blocker, so that goes first, and
+    // each completion is watched leave on its own.
+    await todoBoard.complete(COORDINATION.blocker);
+    await todoBoard.waitForStatus(COORDINATION.blocker, DONE);
+    await sidebar.waitForDocumentGone("todos", String(blocker));
+
+    await todoBoard.complete(COORDINATION.blocked);
+    await todoBoard.waitForStatus(COORDINATION.blocked, DONE);
+    await sidebar.waitForDocumentGone("todos", String(locked));
+
+    // What stays is checked whole: the read todo at its role, and the scratchpad untouched by any
+    // of it — a drop that swept the group, or that keyed on the wrong todo, cannot pass this.
+    const todos = await sidebar.documentRows("todos");
+    expect(todos.map(({ handle, role }) => ({ handle, role }))).toEqual([
+      { handle: String(loaded), role: EDITING },
+    ]);
+    const scratchpads = await sidebar.documentRows("scratchpads");
+    expect(scratchpads.map((row) => row.handle)).toEqual([String(scratchpad)]);
+  });
+
+  it("empties both groups when the lead stops", async () => {
+    await sidebar.waitForDocumentRole("todos", String(loaded), EDITING);
 
     await sidebar.stop(LEAD);
     await sidebar.waitForRowStatus(LEAD, STOPPED);
 
-    // Stopping the selected process moves the window off its pane, so re-open the stopped lead's
-    // pane and read the header that is actually on screen: a context still recorded would render
-    // there again, and only a record the core really dropped leaves it empty.
-    await sidebar.select(LEAD);
-    await terminalPane.waitForSessionWorkCleared();
+    // The sidebar is always on screen, so the drop is read where it happens. A stopped process
+    // stays in the registry, and the close hook releases its todo lock straight into the store
+    // without announcing it — so the only thing that tells the window these rows are gone is the
+    // session record announcing its own drop — this step is what that announcement exists for.
+    await sidebar.waitForNoDocuments("todos");
+    await sidebar.waitForNoDocuments("scratchpads");
   });
 });

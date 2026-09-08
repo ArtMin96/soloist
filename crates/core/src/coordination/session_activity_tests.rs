@@ -1,5 +1,5 @@
 //! [`SessionActivity`] behaviour: what a record holds, how it grows and caps, and when it actually
-//! changes — the source the session-work read model and the process-close hook both depend on.
+//! changes — the source the project-work read model and the process-close hook both depend on.
 
 use super::*;
 use crate::testing::drain;
@@ -118,6 +118,38 @@ fn releasing_all_forgets_the_process() {
     LockReleaser::release_all(&registry, LEAD);
 
     assert!(registry.todos(LEAD).is_empty());
+}
+
+#[test]
+fn announces_a_forgotten_record_when_the_process_closes() {
+    let bus = EventBus::new(16);
+    let mut rx = bus.subscribe();
+    let registry = SessionActivity::new(bus);
+    registry.record_todo(LEAD, TodoId::from_raw(1), AccessKind::Loaded);
+    drain(&mut rx);
+
+    LockReleaser::release_all(&registry, LEAD);
+
+    let events = drain(&mut rx);
+    assert_eq!(events.len(), 1, "exactly one event: {events:?}");
+    assert!(matches!(
+        &events[0],
+        DomainEvent::SessionWorkChanged { process } if *process == LEAD
+    ));
+}
+
+#[test]
+fn stays_silent_forgetting_a_process_it_never_recorded() {
+    let bus = EventBus::new(16);
+    let mut rx = bus.subscribe();
+    let registry = SessionActivity::new(bus);
+
+    LockReleaser::release_all(&registry, LEAD);
+
+    assert!(
+        drain(&mut rx).is_empty(),
+        "forgetting a process with no record announces nothing"
+    );
 }
 
 #[test]

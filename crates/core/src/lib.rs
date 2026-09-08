@@ -127,8 +127,8 @@ pub use notify::{
     Presence, ProcessAttention,
 };
 pub use orchestration::{
-    AgentNode, AgentSignal, LineageEdge, OrchestrationSnapshot, SessionScratchpad, SessionTodo,
-    SessionWork,
+    AgentNode, AgentSignal, DocumentParticipant, DocumentRole, LineageEdge, OrchestrationSnapshot,
+    ProjectWork, ScratchpadWork, TodoWork,
 };
 pub use orphans::{OrphanInfo, OrphanReport};
 pub use ports::{

@@ -66,14 +66,14 @@ export function OrchestrationPane({
   onOpenAgent,
 }: {
   project: ProjectView;
-  /** A session-work item to switch to and expand/select, set by the caller on each activation. */
+  /** A document to switch to and expand/select, set by the caller on each activation. */
   focus?: OrchestrationFocus | null;
   /** Opens the agent a todo row is locked by — forwarded to the todo board. */
   onOpenAgent?: (process: number) => void;
 }) {
   const { snapshot, error, refresh } = useOrchestration(project.id);
   // Seeded from the activation, because the pane the inbound navigation lands in is a fresh one:
-  // opening a session-work item deselects the process and names the target in a single commit, so
+  // opening a document deselects the process and names the target in a single commit, so
   // the target is already on the props of the pane's very first render. Adjusting after mount is
   // too late — there is no later render for it to happen in.
   const [view, setView] = useState<View>(focus?.view ?? DEFAULT_VIEW);
@@ -149,7 +149,7 @@ export function OrchestrationPane({
                 <ScratchpadBoard
                   project={project.id}
                   scratchpads={model.scratchpads}
-                  focusName={focus?.view === "scratchpads" ? focus.name : undefined}
+                  focusId={focus?.view === "scratchpads" ? focus.id : undefined}
                   focusNonce={focus?.view === "scratchpads" ? focus.nonce : undefined}
                 />
               )}

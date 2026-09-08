@@ -1,14 +1,30 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { DEFAULT_SIDEBAR } from "@/lib/sidebar";
 import type { ProcessActionHandlers } from "@/lib/processActions";
 import { HotkeysContext } from "@/store/hotkeysContext";
 import { SidebarSettingsContext } from "@/store/sidebarSettingsContext";
-import type { HotkeyBindingView } from "@/domain";
+import type { HotkeyBindingView, ProjectWork } from "@/domain";
 import type { Sidebar as SidebarSettings } from "@/domain";
+
+// `Sidebar` reads its Todos/Scratchpads rows through `useProjectWork`, which calls the Tauri
+// bridge; mock it so tests control what work is on screen rather than hitting an absent backend.
+vi.mock("@/api", () => ({
+  projectWork: vi.fn(),
+  onDomainEvent: vi.fn(() => Promise.resolve(() => {})),
+  onResync: vi.fn(() => Promise.resolve(() => {})),
+}));
+
+import { projectWork } from "@/api";
+
+const readWork = vi.mocked(projectWork);
+
+function emptyWork(project: number): ProjectWork {
+  return { project, todos: [], scratchpads: [] };
+}
 
 const noop = () => {};
 
@@ -106,6 +122,8 @@ function renderSidebar(
     bindings?: HotkeyBindingView[];
     lineage?: ReadonlyMap<number, number>;
     onReorderProjects?: (order: number[]) => void;
+    onOpenTodo?: (project: number, todo: number) => void;
+    onOpenScratchpad?: (project: number, scratchpad: number) => void;
   } = {},
 ) {
   const {
@@ -117,6 +135,8 @@ function renderSidebar(
     bindings = DEFAULT_BINDINGS,
     lineage = new Map(),
     onReorderProjects = noop,
+    onOpenTodo = noop,
+    onOpenScratchpad = noop,
   } = overrides;
   render(
     <TooltipProvider>
@@ -139,6 +159,8 @@ function renderSidebar(
             onOpenOrchestration={noop}
             onRemoveProject={noop}
             onReorderProjects={onReorderProjects}
+            onOpenTodo={onOpenTodo}
+            onOpenScratchpad={onOpenScratchpad}
           />
         </SidebarSettingsContext>
       </HotkeysContext>
@@ -146,6 +168,10 @@ function renderSidebar(
   );
   return screen.getByRole("navigation");
 }
+
+beforeEach(() => {
+  readWork.mockImplementation((project: number) => Promise.resolve(emptyWork(project)));
+});
 
 afterEach(cleanup);
 
@@ -200,6 +226,55 @@ describe("Sidebar filter", () => {
   });
 });
 
+describe("Sidebar document rows", () => {
+  // Only project A (holding `claude`, process 10) has live work — project B stays empty, so a row
+  // is never ambiguous between the two projects' Todos groups.
+  function workForProjectA(project: number): Promise<ProjectWork> {
+    if (project !== 1) return Promise.resolve(emptyWork(project));
+    return Promise.resolve({
+      project,
+      todos: [
+        {
+          id: 5,
+          title: "wire the sidebar",
+          status: "open",
+          participants: [{ process: 10, label: "claude", role: "reading" }],
+        },
+      ],
+      scratchpads: [],
+    });
+  }
+
+  it("shows a project's document rows when nothing is filtering the tree", async () => {
+    readWork.mockImplementation(workForProjectA);
+    renderSidebar();
+    await waitFor(() => expect(screen.getByText("wire the sidebar")).toBeTruthy());
+    expect(document.querySelectorAll("[data-document-row]").length).toBeGreaterThan(0);
+  });
+
+  it("hides every document row while a filter query is active", async () => {
+    readWork.mockImplementation(workForProjectA);
+    renderSidebar();
+    await waitFor(() => expect(screen.getByText("wire the sidebar")).toBeTruthy());
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Filter processes" }), {
+      target: { value: "claude" },
+    });
+
+    expect(document.querySelectorAll("[data-document-row]").length).toBe(0);
+  });
+
+  it("clicking a todo row calls onOpenTodo with the project and the todo id", async () => {
+    readWork.mockImplementation(workForProjectA);
+    const onOpenTodo = vi.fn();
+    renderSidebar({ onOpenTodo });
+    const row = await screen.findByRole("button", { name: /wire the sidebar/ });
+
+    fireEvent.click(row);
+    expect(onOpenTodo).toHaveBeenCalledWith(1, 5);
+  });
+});
+
 describe("Sidebar lineage nesting", () => {
   const WORKER = {
     id: 12,
@@ -244,6 +319,8 @@ describe("Sidebar lineage nesting", () => {
               onOpenOrchestration={noop}
               onRemoveProject={noop}
               onReorderProjects={noop}
+              onOpenTodo={noop}
+              onOpenScratchpad={noop}
             />
           </SidebarSettingsContext>
         </HotkeysContext>
@@ -278,6 +355,34 @@ describe("Sidebar hotkeys", () => {
     const current = screen.getByRole("treeitem", { name: /claude/ });
     current.focus();
     fireEvent.keyDown(current, { key: "ArrowDown" });
+    expect(onSelect).toHaveBeenCalledWith(11);
+    expect(document.activeElement).toBe(screen.getByRole("treeitem", { name: /build/ }));
+  });
+
+  it("ArrowDown still lands on the next process row when the project also shows document rows", async () => {
+    readWork.mockImplementation((project: number) => {
+      if (project !== 1) return Promise.resolve(emptyWork(project));
+      return Promise.resolve({
+        project,
+        todos: [
+          {
+            id: 5,
+            title: "wire the sidebar",
+            status: "open" as const,
+            participants: [{ process: 10, label: "claude", role: "reading" as const }],
+          },
+        ],
+        scratchpads: [],
+      });
+    });
+    const onSelect = vi.fn();
+    renderSidebar({ selectedId: 10, onSelect });
+    await waitFor(() => expect(screen.getByText("wire the sidebar")).toBeTruthy());
+
+    const current = screen.getByRole("treeitem", { name: /claude/ });
+    current.focus();
+    fireEvent.keyDown(current, { key: "ArrowDown" });
+
     expect(onSelect).toHaveBeenCalledWith(11);
     expect(document.activeElement).toBe(screen.getByRole("treeitem", { name: /build/ }));
   });
@@ -456,6 +561,8 @@ describe("Sidebar Trust control", () => {
               onOpenOrchestration={noop}
               onRemoveProject={noop}
               onReorderProjects={noop}
+              onOpenTodo={noop}
+              onOpenScratchpad={noop}
             />
           </SidebarSettingsContext>
         </HotkeysContext>

@@ -570,7 +570,7 @@ pub fn run() {
             commands::orchestration_snapshot,
             commands::lineage_edges,
             commands::agent_activity,
-            commands::session_work,
+            commands::project_work,
             commands::scratchpad_read,
             commands::scratchpad_write,
             commands::scratchpad_archive,

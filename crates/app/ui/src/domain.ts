@@ -330,8 +330,9 @@ export type DomainEvent =
   // Coordination change-notifications (C6) for the orchestration read-model. Each carries ids
   // only — the UI re-reads orchestration_snapshot (coalesced) rather than trusting a payload.
   | { type: "TodoChanged"; project: number; id: number }
-  // A process's recorded session-work touched a todo or scratchpad, or the process closed and its
-  // record was forgotten. Carries the process only — the surface re-reads sessionWork(process).
+  // A process's recorded session activity touched a todo or scratchpad, or the process closed and its
+  // record was forgotten. Carries the process only — the surface maps it to a project and
+  // re-reads projectWork(project).
   | { type: "SessionWorkChanged"; process: number }
   // A recorded agent-to-agent exchange changed — queued, woken, or acknowledged. The body stays
   // off the bus; the retained record on the snapshot is its single source.
@@ -911,34 +912,38 @@ export interface OrchestrationSnapshot {
   messages: AgentMessageRecord[];
 }
 
-// ── Session work context (mirrors core::orchestration) ───────────────────────
-// How an agent touched a coordination document this run: read through a tool, or written.
-export type AccessKind = "loaded" | "worked";
+// ── Project work context (mirrors core::orchestration) ───────────────────────
+// How one live process is engaged with a coordination document this run (mirrors core::DocumentRole).
+export type DocumentRole = "implementing" | "editing" | "reading";
 
-export interface SessionTodo {
+export interface DocumentParticipant {
+  process: number;
+  /** The process's display label — the same one its sidebar row wears. */
+  label: string;
+  role: DocumentRole;
+}
+
+export interface TodoWork {
   id: number;
   title: string;
   status: TodoStatus;
-  blocked: boolean;
-  /** True while this process holds the todo's lock — "current work". */
-  locked: boolean;
-  /** How this process last touched it this run; null when it holds the lock without a tool access. */
-  access: AccessKind | null;
+  /** Every live process engaged with it, by ascending process id; never empty. */
+  participants: DocumentParticipant[];
 }
 
-export interface SessionScratchpad {
+export interface ScratchpadWork {
   id: number;
   name: string;
-  access: AccessKind;
+  /** Every live process engaged with it, by ascending process id; never empty. */
+  participants: DocumentParticipant[];
 }
 
-// The coordination documents one process holds now or touched this run — the agent terminal
-// header's context. Produced by the `session_work` query (exposed to the UI by a Tauri command).
-export interface SessionWork {
-  process: number;
+// The coordination documents a project's live processes hold or touched this run, grouped by
+// document. Produced by the `project_work` query (exposed to the UI by a Tauri command).
+export interface ProjectWork {
   project: number;
-  todos: SessionTodo[];
-  scratchpads: SessionScratchpad[];
+  todos: TodoWork[];
+  scratchpads: ScratchpadWork[];
 }
 
 // ── Settings (mirrors core::settings) ───────────────────────────────────────

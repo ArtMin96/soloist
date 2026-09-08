@@ -1,6 +1,7 @@
 //! The per-run session-activity record (context C6): which coordination documents a bound agent
-//! read or wrote through a tool call this run — the agent terminal header's "current work" / "this
-//! session" context.
+//! read or wrote through a tool call this run — the per-process source the sidebar's per-project
+//! work read model ([`Facade::project_work`](crate::Facade::project_work)) joins against the live
+//! process registry.
 //!
 //! Distinct from a todo's durable lock and from a scratchpad's revision: this is ephemeral,
 //! in-memory bookkeeping of *access*, not ownership or content. It exists purely to answer "what has
@@ -69,7 +70,9 @@ fn record<Id: PartialEq>(entries: &mut Vec<(Id, AccessKind)>, id: Id, kind: Acce
 
 /// The per-run session-activity registry: what each bound process has read or written through a
 /// tool call so far, keyed by process. Shared behind an `Arc` between the façade methods that
-/// record an access and query it, and the supervisor's close hook that clears a process's entry.
+/// record an access and query it, and the supervisor's close hook that clears a process's entry —
+/// announcing the clear, so a project's live-work listing drops the closed process's documents
+/// without waiting for another event.
 pub struct SessionActivity {
     bus: EventBus,
     touched: Mutex<HashMap<ProcessId, Touched>>,
@@ -137,8 +140,14 @@ impl SessionActivity {
     }
 
     /// Drops everything recorded for `process` — the per-run record ends when the process does.
+    /// Announces the drop when there was one, so a surface listing a project's live work stops
+    /// listing a closed process's documents without waiting for an unrelated event.
     pub fn forget(&self, process: ProcessId) {
-        lock(&self.touched).remove(&process);
+        let existed = lock(&self.touched).remove(&process).is_some();
+        if existed {
+            self.bus
+                .publish(DomainEvent::SessionWorkChanged { process });
+        }
     }
 }
 

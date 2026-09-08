@@ -3,9 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ProjectGroup } from "@/components/sidebar/ProjectGroup";
 import { SortableList } from "@/components/SortableList";
+import { DEFAULT_SIDEBAR } from "@/lib/sidebar";
+import { SidebarSettingsContext } from "@/store/sidebarSettingsContext";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { ProcessActionHandlers } from "@/lib/processActions";
 import type { ProjectTree } from "@/store/projects";
+import type { ProjectWork } from "@/domain";
 
 const tree: ProjectTree = {
   project: { id: 1, name: "Storefront", root: "/p/storefront", icon: null },
@@ -40,6 +43,11 @@ const groupProps = {
   onOpenProjectSettings: noop,
   onOpenOrchestration: noop,
   onRemoveProject: noop,
+  work: undefined,
+  workOpen: () => true,
+  onWorkOpenChange: noop,
+  onOpenTodo: noop,
+  onOpenScratchpad: noop,
 };
 
 interface ProjectActionOverrides {
@@ -49,6 +57,9 @@ interface ProjectActionOverrides {
   onOpenOrchestration?: () => void;
   onOpenProjectSettings?: () => void;
   onRemoveProject?: () => void;
+  work?: ProjectWork | undefined;
+  onOpenTodo?: (todo: number) => void;
+  onOpenScratchpad?: (scratchpad: number) => void;
 }
 
 // A project header inside the arrangeable project list, which is what supplies its move actions —
@@ -77,6 +88,11 @@ function renderGroup(
           onOpenProjectSettings={overrides.onOpenProjectSettings ?? noop}
           onOpenOrchestration={overrides.onOpenOrchestration ?? noop}
           onRemoveProject={overrides.onRemoveProject ?? noop}
+          work={overrides.work}
+          workOpen={() => true}
+          onWorkOpenChange={noop}
+          onOpenTodo={overrides.onOpenTodo ?? noop}
+          onOpenScratchpad={overrides.onOpenScratchpad ?? noop}
         />
       </SortableList>
     </TooltipProvider>,
@@ -281,4 +297,82 @@ describe("ProjectGroup menu section layout", () => {
       expect(menuContentSlots(menu)).toEqual(expectedMenuSlots(menu, sectionCount));
     },
   );
+});
+
+const TODO_WORK: ProjectWork = {
+  project: 1,
+  todos: [
+    {
+      id: 7,
+      title: "Ship the sidebar groups",
+      status: "in_progress",
+      participants: [{ process: 3, label: "lead", role: "implementing" }],
+    },
+  ],
+  scratchpads: [],
+};
+
+const TODO_AND_SCRATCHPAD_WORK: ProjectWork = {
+  ...TODO_WORK,
+  scratchpads: [
+    {
+      id: 2,
+      name: "release-readiness",
+      participants: [{ process: 3, label: "lead", role: "reading" }],
+    },
+  ],
+};
+
+const EMPTY_WORK: ProjectWork = { project: 1, todos: [], scratchpads: [] };
+
+describe("ProjectGroup document groups", () => {
+  it("renders both document groups after the process groups when work is present", () => {
+    renderGroup(["1"], { work: TODO_AND_SCRATCHPAD_WORK });
+    expect(screen.getByText("Todos")).toBeTruthy();
+    expect(screen.getByText("Scratchpads")).toBeTruthy();
+    expect(screen.getByText("Ship the sidebar groups")).toBeTruthy();
+    expect(screen.getByText("Release readiness")).toBeTruthy();
+  });
+
+  it("renders only the Todos group when there is no scratchpad work", () => {
+    renderGroup(["1"], { work: TODO_WORK });
+    expect(screen.getByText("Todos")).toBeTruthy();
+    expect(screen.queryByText("Scratchpads")).toBeNull();
+  });
+
+  it("a todo row click calls onOpenTodo with the todo id", () => {
+    const onOpenTodo = vi.fn();
+    renderGroup(["1"], { work: TODO_WORK, onOpenTodo });
+    fireEvent.click(screen.getByRole("button", { name: /Ship the sidebar groups/ }));
+    expect(onOpenTodo).toHaveBeenCalledWith(7);
+  });
+
+  it("a scratchpad row click calls onOpenScratchpad with the scratchpad id", () => {
+    const onOpenScratchpad = vi.fn();
+    renderGroup(["1"], { work: TODO_AND_SCRATCHPAD_WORK, onOpenScratchpad });
+    fireEvent.click(screen.getByRole("button", { name: /Release readiness/ }));
+    expect(onOpenScratchpad).toHaveBeenCalledWith(2);
+  });
+
+  it("renders neither group with empty work, under the default hide_empty_sections", () => {
+    renderGroup(["1"], { work: EMPTY_WORK });
+    expect(screen.queryByText("Todos")).toBeNull();
+    expect(screen.queryByText("Scratchpads")).toBeNull();
+  });
+
+  it("renders neither group with empty work even when hide_empty_sections is true", () => {
+    render(
+      <TooltipProvider>
+        <SidebarSettingsContext
+          value={{ sidebar: { ...DEFAULT_SIDEBAR, hide_empty_sections: true }, setSidebar: noop }}
+        >
+          <SortableList ids={["1"]} onReorder={noop}>
+            <ProjectGroup {...groupProps} work={EMPTY_WORK} />
+          </SortableList>
+        </SidebarSettingsContext>
+      </TooltipProvider>,
+    );
+    expect(screen.queryByText("Todos")).toBeNull();
+    expect(screen.queryByText("Scratchpads")).toBeNull();
+  });
 });

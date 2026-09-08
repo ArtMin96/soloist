@@ -13,7 +13,10 @@ import {
   SettingsOverlay,
   TerminalPane,
 } from "@/components/deferredAppComponents";
-import type { OrchestrationFocus } from "@/components/orchestration/orchestrationFocus";
+import type {
+  OrchestrationFocus,
+  OrchestrationTarget,
+} from "@/components/orchestration/orchestrationFocus";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { NotificationToasts } from "@/components/NotificationToasts";
 import { OrphanDialog } from "@/components/OrphanDialog";
@@ -165,14 +168,11 @@ export default function App() {
     [deselectProcess],
   );
 
-  // The session-work bar's opener: reuses `openOrchestration` for the pane switch, then names the
+  // The document rows' opener: reuses `openOrchestration` for the pane switch, then names the
   // exact item to focus with a fresh nonce, so activating the same item twice in a row still
   // refocuses it rather than being a no-op.
   const openOrchestrationItem = useCallback(
-    (
-      projectId: number,
-      focus: { view: "todos"; id: number } | { view: "scratchpads"; name: string },
-    ) => {
+    (projectId: number, focus: OrchestrationTarget) => {
       openOrchestration(projectId);
       setOrchestrationFocus({ ...focus, nonce: Date.now() });
     },
@@ -332,6 +332,12 @@ export default function App() {
                             onOpenOrchestration={openOrchestration}
                             onRemoveProject={projects.remove}
                             onReorderProjects={projects.reorder}
+                            onOpenTodo={(project, id) =>
+                              openOrchestrationItem(project, { view: "todos", id })
+                            }
+                            onOpenScratchpad={(project, id) =>
+                              openOrchestrationItem(project, { view: "scratchpads", id })
+                            }
                           />
                         </WatchContext>
                         {/* A column, so the diff opens as a split at the foot of the area
@@ -353,15 +359,6 @@ export default function App() {
                                     processes={store.processes}
                                     onSelectProcess={selectProcess}
                                     handlers={handlers}
-                                    onOpenTodo={(id) =>
-                                      openOrchestrationItem(process.project, { view: "todos", id })
-                                    }
-                                    onOpenScratchpad={(name) =>
-                                      openOrchestrationItem(process.project, {
-                                        view: "scratchpads",
-                                        name,
-                                      })
-                                    }
                                   />
                                 ))}
                                 {!selected &&

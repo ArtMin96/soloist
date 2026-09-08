@@ -1,6 +1,8 @@
 import { Fragment, useState, type ComponentType, type ReactNode } from "react";
 import { ChevronRight, MoreHorizontal } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { documentItems } from "@/components/sidebar/documentItems";
+import { DocumentGroup } from "@/components/sidebar/DocumentGroup";
 import { ProcessGroup } from "@/components/sidebar/ProcessGroup";
 import { projectActions, type ProjectActionSection } from "@/components/sidebar/projectActions";
 import { RemoveProjectDialog } from "@/components/sidebar/RemoveProjectDialog";
@@ -32,9 +34,9 @@ import type { ProcessActionHandlers } from "@/lib/processActions";
 import { cn } from "@/lib/utils";
 import { useUnreadProject } from "@/store/attentionContext";
 import { useWatchLimit } from "@/store/watchContext";
-import { monogram, type ProjectTree } from "@/store/projects";
+import { monogram, WORK_SECTIONS, type ProjectTree, type WorkSection } from "@/store/projects";
 import type { ToggleSet } from "@/store/useToggleSet";
-import type { ProcessKind } from "@/domain";
+import type { ProcessKind, ProjectWork } from "@/domain";
 
 /** One place toward the top of the list, and one place toward its bottom. */
 const MOVE_TOWARD_TOP = -1;
@@ -83,6 +85,12 @@ interface ProjectGroupProps {
   onOpenProjectSettings: () => void;
   onOpenOrchestration: () => void;
   onRemoveProject: () => void;
+  /** This project's live coordination work, or undefined while none is loaded or a filter is active. */
+  work: ProjectWork | undefined;
+  workOpen: (section: WorkSection) => boolean;
+  onWorkOpenChange: (section: WorkSection, open: boolean) => void;
+  onOpenTodo: (todo: number) => void;
+  onOpenScratchpad: (scratchpad: number) => void;
 }
 
 // One project in the sidebar source list: a collapsible header (disclosure + icon + name +
@@ -108,6 +116,11 @@ export function ProjectGroup({
   onOpenProjectSettings,
   onOpenOrchestration,
   onRemoveProject,
+  work,
+  workOpen,
+  onWorkOpenChange,
+  onOpenTodo,
+  onOpenScratchpad,
 }: ProjectGroupProps) {
   const { project, kinds, count } = tree;
   const unread = useUnreadProject(project.id);
@@ -231,18 +244,33 @@ export function ProjectGroup({
           {count.total === 0 ? (
             <p className="px-1 py-1 text-[0.6875rem] text-muted-foreground">No processes yet</p>
           ) : (
-            kinds.map((group) => (
-              <ProcessGroup
-                key={group.kind}
-                group={group}
-                open={kindOpen(group.kind)}
-                onOpenChange={(value) => onKindOpenChange(group.kind, value)}
-                collapsedLeads={collapsedLeads}
-                selectedId={selectedId}
-                onSelect={onSelect}
-                handlers={handlers}
-              />
-            ))
+            <>
+              {kinds.map((group) => (
+                <ProcessGroup
+                  key={group.kind}
+                  group={group}
+                  open={kindOpen(group.kind)}
+                  onOpenChange={(value) => onKindOpenChange(group.kind, value)}
+                  collapsedLeads={collapsedLeads}
+                  selectedId={selectedId}
+                  onSelect={onSelect}
+                  handlers={handlers}
+                />
+              ))}
+              {WORK_SECTIONS.map((section) => {
+                const items = documentItems(work, section, onOpenTodo, onOpenScratchpad);
+                if (items.length === 0) return null;
+                return (
+                  <DocumentGroup
+                    key={section}
+                    section={section}
+                    items={items}
+                    open={workOpen(section)}
+                    onOpenChange={(value) => onWorkOpenChange(section, value)}
+                  />
+                );
+              })}
+            </>
           )}
         </div>
       </CollapsibleContent>

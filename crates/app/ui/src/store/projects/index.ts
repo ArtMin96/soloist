@@ -12,3 +12,9 @@ export {
   type RunningCount,
 } from "@/store/projects/tree";
 export { monogram, projectCollapseKey, kindCollapseKey } from "@/store/projects/view";
+export {
+  workCollapseKey,
+  WORK_SECTIONS,
+  WORK_SECTION_LABELS,
+  type WorkSection,
+} from "@/store/projects/work";

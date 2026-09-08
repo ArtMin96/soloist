@@ -569,6 +569,11 @@ function SidebarStateColumn({ title, width }: { title: string; width: string }) 
           onOpenProjectSettings={() => {}}
           onOpenOrchestration={() => {}}
           onRemoveProject={() => {}}
+          work={undefined}
+          workOpen={() => true}
+          onWorkOpenChange={() => {}}
+          onOpenTodo={() => {}}
+          onOpenScratchpad={() => {}}
         />
         {["Agents", "Terminals", "Commands"].map((group) => (
           <div key={group} className="flex flex-col gap-px">

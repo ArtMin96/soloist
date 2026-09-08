@@ -68,14 +68,14 @@ const ledger = createNavigationLedger();
 export function ScratchpadBoard({
   project,
   scratchpads,
-  focusName,
+  focusId,
   focusNonce,
 }: {
   project: number;
   scratchpads: ScratchpadSummary[];
   /** The scratchpad to open the detail panel on when `focusNonce` changes — cross-surface navigation. */
-  focusName?: string;
-  /** Bumped to re-trigger the navigation above, even to repeat the same `focusName`. */
+  focusId?: number;
+  /** Bumped to re-trigger the navigation above, even to repeat the same `focusId`. */
   focusNonce?: number;
 }) {
   const actions = useScratchpadActions(project);
@@ -111,8 +111,10 @@ export function ScratchpadBoard({
     present: (id) => scratchpads.some((pad) => pad.id === id),
     rowTrigger: (id) => `[${SCRATCHPAD_ROW_ID_ATTRIBUTE}="${id}"] [${CARD_TRIGGER_ATTRIBUTE}]`,
     createTrigger: `[${BOARD_CREATE_ATTRIBUTE}="scratchpad"]`,
-    focusKey: scratchpads.find((pad) => pad.name === focusName)?.id,
+    focusKey: focusId,
     focusNonce,
+    // The board routes by id, but a scratchpad's document is read and written by name — so the
+    // editor is handed the name the id resolves to in the snapshot the route just checked.
     onOpen: (id) => {
       setMode("read");
       const name = scratchpads.find((pad) => pad.id === id)?.name;

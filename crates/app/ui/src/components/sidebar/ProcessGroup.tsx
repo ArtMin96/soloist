@@ -1,6 +1,5 @@
-import { ChevronRight } from "lucide-react";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ProcessNode } from "@/components/sidebar/ProcessNode";
+import { SidebarGroup } from "@/components/sidebar/SidebarGroup";
 import type { ProcessActionHandlers } from "@/lib/processActions";
 import type { ProcessGroup as Group } from "@/store/grouping";
 import type { ToggleSet } from "@/store/useToggleSet";
@@ -31,35 +30,26 @@ export function ProcessGroup({
 }: ProcessGroupProps) {
   const treeColumn = group.roots.some((root) => root.children.length > 0);
   return (
-    <Collapsible open={open} onOpenChange={onOpenChange} className="select-none">
-      <CollapsibleTrigger className="group/trigger flex w-full items-center gap-1.5 rounded-sm px-1 py-1 text-left outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring">
-        <ChevronRight
-          aria-hidden
-          className="size-3 text-muted-foreground transition-transform duration-[var(--dur-control)] ease-spring-settle group-data-[state=open]/trigger:rotate-90"
-        />
-        <span className="text-[0.6875rem] font-[550] tracking-[0.01em] text-muted-foreground">
-          {group.label}
-        </span>
-        <span className="ml-auto pr-1 font-mono text-[0.6875rem] tabular-nums text-muted-foreground">
-          {group.processes.length}
-        </span>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="overflow-hidden data-[state=open]:animate-disclose-down data-[state=closed]:animate-disclose-up">
-        <div role="tree" aria-label={group.label} className="mt-0.5 flex flex-col gap-px pl-1">
-          {group.roots.map((root) => (
-            <ProcessNode
-              key={root.process.id}
-              node={root}
-              depth={0}
-              treeColumn={treeColumn}
-              collapsedLeads={collapsedLeads}
-              selectedId={selectedId}
-              onSelect={onSelect}
-              handlers={handlers}
-            />
-          ))}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
+    <SidebarGroup
+      label={group.label}
+      count={group.processes.length}
+      open={open}
+      onOpenChange={onOpenChange}
+    >
+      <div role="tree" aria-label={group.label} className="mt-0.5 flex flex-col gap-px pl-1">
+        {group.roots.map((root) => (
+          <ProcessNode
+            key={root.process.id}
+            node={root}
+            depth={0}
+            treeColumn={treeColumn}
+            collapsedLeads={collapsedLeads}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            handlers={handlers}
+          />
+        ))}
+      </div>
+    </SidebarGroup>
   );
 }
