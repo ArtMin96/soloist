@@ -130,7 +130,7 @@ export function DetailBackButton({
       size="sm"
       onClick={onClick}
       aria-label={`Back to ${destination}`}
-      className={cn("min-w-0 text-muted-foreground", SQUARE_WIDE)}
+      className={cn("min-w-0 text-secondary-label", SQUARE_WIDE)}
     >
       <ChevronLeft aria-hidden data-icon="inline-start" />
       {/* Names the destination, which is what a back control in a two-panel board should say. */}

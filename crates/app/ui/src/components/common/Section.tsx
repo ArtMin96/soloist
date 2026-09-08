@@ -40,17 +40,17 @@ export function Section({ title, aside, action, description, className, children
       <div className={cn("flex gap-2", action == null ? "items-baseline" : "items-center")}>
         <h3
           id={headingId}
-          className="type-label min-w-0 truncate font-medium tracking-[var(--tracking-label)] text-muted-foreground"
+          className="type-label min-w-0 truncate font-medium tracking-[var(--tracking-label)] text-secondary-label"
         >
           {title}
         </h3>
         {aside != null && (
-          <span className="type-label shrink-0 tabular-nums text-muted-foreground">{aside}</span>
+          <span className="type-label shrink-0 tabular-nums text-secondary-label">{aside}</span>
         )}
         {action != null && <div className="ml-auto shrink-0">{action}</div>}
       </div>
       {description != null && (
-        <p className="type-body max-w-[52ch] text-muted-foreground">{description}</p>
+        <p className="type-body max-w-[52ch] text-text-muted">{description}</p>
       )}
       {children}
     </section>

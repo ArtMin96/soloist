@@ -54,7 +54,7 @@ export function BoardToolbar({
         {/* Sized to match the sm controls beside it; the leading icon's inset is the group's own,
             so nothing here hand-picks a padding to clear it. */}
         <InputGroup className="h-7 min-w-32 flex-1 basis-40">
-          <InputGroupAddon>
+          <InputGroupAddon className="text-icon-muted">
             <Search aria-hidden />
           </InputGroupAddon>
           <InputGroupInput
@@ -70,7 +70,7 @@ export function BoardToolbar({
           {...{ [BOARD_COUNT_ATTRIBUTE]: "" }}
           aria-live="polite"
           aria-atomic="true"
-          className="type-label shrink-0 text-muted-foreground"
+          className="type-label shrink-0 text-secondary-label"
         >
           {shown} of {total}
         </output>

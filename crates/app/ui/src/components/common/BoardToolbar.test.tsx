@@ -82,6 +82,22 @@ describe("BoardToolbar", () => {
     expect(count.getAttribute("aria-atomic")).toBe("true");
   });
 
+  it("uses the secondary label role and a solid semantic focus ring", () => {
+    const { container } = render(<Harness />);
+    const count = screen.getByRole("status");
+    const searchGroup = container.querySelector('[data-slot="input-group"]') as HTMLElement;
+    const searchAddon = container.querySelector('[data-slot="input-group-addon"]') as HTMLElement;
+
+    expect(count.className.split(/\s+/)).toContain("text-secondary-label");
+    expect(searchAddon.className.split(/\s+/)).toContain("text-icon-muted");
+    expect(searchGroup.className.split(/\s+/)).toContain(
+      "has-[[data-slot=input-group-control]:focus-visible]:ring-ring",
+    );
+    expect(searchGroup.className.split(/\s+/)).not.toContain(
+      "has-[[data-slot=input-group-control]:focus-visible]:ring-ring/50",
+    );
+  });
+
   it("sets the board's facet controls between the searchbox and the count", () => {
     toolbar({ facets: <button type="button">Sort scratchpads</button> });
 

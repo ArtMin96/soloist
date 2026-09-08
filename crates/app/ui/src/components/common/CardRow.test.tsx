@@ -83,6 +83,32 @@ describe("CardRow", () => {
     expect(trigger().className).toContain("focus-visible:ring-inset");
     expect(trigger().className).toContain("motion-reduce:transition-none");
   });
+
+  it("pairs every interactive row surface with its sidebar foreground roles", () => {
+    row();
+
+    const classes = trigger().className.split(/\s+/);
+    expect(classes).toContain("hover:text-sidebar-accent-foreground");
+    expect(classes).toContain("active:text-sidebar-accent-foreground");
+    expect(classes).toContain("focus-visible:text-sidebar-accent-foreground");
+    expect(classes).toContain("hover:[--foreground:var(--theme-sidebar-foreground)]");
+    expect(classes).toContain("active:[--foreground:var(--theme-sidebar-foreground)]");
+    expect(classes).toContain("focus-visible:[--foreground:var(--theme-sidebar-foreground)]");
+    expect(classes).toContain("hover:[--muted-foreground:var(--theme-sidebar-muted-foreground)]");
+    expect(classes).toContain("active:[--muted-foreground:var(--theme-sidebar-muted-foreground)]");
+    expect(classes).toContain(
+      "focus-visible:[--muted-foreground:var(--theme-sidebar-muted-foreground)]",
+    );
+    expect(classes).toContain("supports-backdrop-filter:active:bg-sidebar-row-active");
+  });
+
+  it("keeps its keyboard focus ring on the solid semantic focus role", () => {
+    row();
+
+    const classes = trigger().className.split(/\s+/);
+    expect(classes).toContain("focus-visible:ring-ring");
+    expect(classes).not.toContain("focus-visible:ring-ring/50");
+  });
 });
 
 describe("CardRowStandIn", () => {

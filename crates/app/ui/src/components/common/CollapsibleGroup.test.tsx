@@ -35,4 +35,23 @@ describe("CollapsibleGroup", () => {
     ).toBe("true");
     expect(screen.getByText("Review request")).toBeTruthy();
   });
+
+  it("keeps the disclosure label and icon paired with the ghost control hover surface", () => {
+    render(
+      <CollapsibleGroup label="Inbox" count={1} open={false} onOpenChange={vi.fn()}>
+        <span>Review request</span>
+      </CollapsibleGroup>,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Inbox, 1 item" });
+    const icon = trigger.querySelector("svg") as SVGElement;
+    const label = screen.getByText("Inbox");
+    expect(trigger.className.split(/\s+/)).toContain("hover:text-toolbar-control-foreground");
+    expect(icon.getAttribute("class")?.split(/\s+/)).toContain(
+      "group-hover/collapsible-group:text-toolbar-control-foreground",
+    );
+    expect(label.className.split(/\s+/)).toContain(
+      "group-hover/collapsible-group:text-toolbar-control-foreground",
+    );
+  });
 });

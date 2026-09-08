@@ -35,4 +35,19 @@ describe("Section", () => {
     expect(region.textContent).toContain("3");
     expect(screen.getByRole("button", { name: "Add" })).toBeTruthy();
   });
+
+  it("uses the dedicated secondary text roles on the content surface", () => {
+    render(
+      <Section title="Commands" aside={3} description="Commands available to this project.">
+        body
+      </Section>,
+    );
+
+    const title = screen.getByText("Commands");
+    const aside = screen.getByText("3");
+    const description = screen.getByText("Commands available to this project.");
+    expect(title.className.split(/\s+/)).toContain("text-secondary-label");
+    expect(aside.className.split(/\s+/)).toContain("text-secondary-label");
+    expect(description.className.split(/\s+/)).toContain("text-text-muted");
+  });
 });

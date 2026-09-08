@@ -67,6 +67,7 @@ describe("TagFilterChips", () => {
     const active = screen.getByRole("button", { name: "beta" });
 
     expect(inactive.className).toMatch(/hover:bg-sidebar-accent/);
+    expect(inactive.className).toMatch(/hover:text-sidebar-accent-foreground/);
     expect(active.className).not.toMatch(/hover:bg-sidebar-accent/);
   });
 

@@ -104,6 +104,8 @@ describe("DetailActions", () => {
     const copy = screen.getByRole("button", { name: "Copy link to todo" });
     expect(edit.textContent).toBe("");
     expect(copy.textContent).toBe("");
+    expect(edit.className.split(/\s+/)).toContain("text-icon-muted");
+    expect(edit.className.split(/\s+/)).toContain("hover:text-toolbar-control-foreground");
 
     fireEvent.focus(edit);
 
@@ -118,11 +120,23 @@ describe("DetailActions", () => {
     const onSelect = vi.fn();
     cluster({ actions: [action({ onSelect, disabled: true })] });
 
-    expect((screen.getByRole("button", { name: "Edit" }) as HTMLButtonElement).disabled).toBe(true);
+    const inline = screen.getByRole("button", { name: "Edit" }) as HTMLButtonElement;
+    expect(inline.disabled).toBe(true);
+    expect(inline.className.split(/\s+/)).toEqual(
+      expect.arrayContaining([
+        "disabled:border-border",
+        "disabled:bg-muted",
+        "disabled:text-muted-foreground",
+      ]),
+    );
+    expect(inline.className.split(/\s+/)).not.toContain("disabled:opacity-50");
 
     openMenu();
 
     const item = await screen.findByRole("menuitem", { name: "Edit todo" });
+    expect(item.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(["data-disabled:opacity-100", "data-disabled:text-text-muted"]),
+    );
     fireEvent.click(item);
     expect(onSelect).not.toHaveBeenCalled();
   });

@@ -9,6 +9,59 @@
 
 ## Current state
 
+> **NEWEST (2026-09-08): COMMON COMPONENT THEME-PAIR AUDIT — `Done — pending verify`,
+> uncommitted on `feat/todo-workspace-ux` (PR #200).** Audited every production file under
+> `components/common/`: `BoardSkeleton`, `BoardToolbar`, `CardRow`, `CollapsibleGroup`, `CreatePane`,
+> `DetailActions`, `DetailPane`, `LoadableRegion`, `LoadingStandIn`, `RecoveryNotice`, `Section`,
+> `SkeletonList`, `SlidingPanels`, `TagFilterChips`, `TagList`, and `Well`, including default, hover,
+> active, focus-visible, disabled, loading, error, empty, animation, and translucent states wherever
+> each component exposes them. Also inspected the paint-bearing primitives those components consume;
+> only `Button`, `Alert`, and `InputGroup` required shared fixes.
+>
+> The audit corrected four real theme-contract failures. Card-row hover/active/focus surfaces now
+> rebind both normal and muted descendant ink to the sidebar roles paired with those row surfaces,
+> including the active state under backdrop-filter support. Tag-chip hover, board counts, section
+> headings/descriptions, detail/back actions, disclosure icons, and disabled menu items now use the
+> purpose-specific `sidebarAccentForeground`, `secondaryLabel`, `textMuted`, `iconMuted`, or toolbar
+> control roles instead of treating `mutedForeground` as universal ink. Destructive alerts now use
+> the solid `errorSurface` + `errorForeground` + `error` border contract rather than error text on an
+> unrelated card. Shared buttons and board search focus now use the full focus role instead of an
+> alpha-composited ring; disabled buttons use a solid `muted` + `mutedForeground` + `border` state;
+> and primary/destructive hover no longer alpha-blends a validated foreground/background pair.
+> No `index.css` mapping was needed: every utility used by the common kit resolves to an existing
+> Soloist theme role. No raw palette colors, hard-coded pigments, `dark:` paint, or appearance branch
+> was added. The runtime already sets native `color-scheme` from the applied theme.
+>
+> **Review correction.** The board search's disabled path still compounded
+> `InputGroup.has-disabled:opacity-50` with `Input.disabled:opacity-50`, reducing its content to an
+> effective 25% before compositing. Both opacity rules are gone: a disabled group owns the solid
+> `muted` surface and `border`, while the child input and group add-on use `mutedForeground`; a
+> standalone disabled input uses the same solid pair. Its focused regression test was observed red
+> against the double-opacity implementation, then passed **1/1**. The post-correction focused
+> `typecheck`, theme-color guard, and `git diff --check` also exited 0.
+>
+> **Evidence.** Seven new assertions across six files were observed failing together against the
+> unfixed classes (**7 failed / 30 passed**), then the final common-component run passed **11 files /
+> 58 tests**. Across every built-in appearance, the corrected pair minima measure 5.08:1 for
+> secondary text, 4.01:1 for muted icons, 5.19:1 for disabled text on muted controls, 4.60:1 for
+> error text, 6.31:1 for toolbar-control hover text, 7.04:1 for sidebar-row text, and 3.57:1 for the
+> solid focus mark against its affected surfaces. `pnpm -C crates/app/ui typecheck`,
+> `node scripts/check-theme-colors.mjs`, the one-shot
+> Impeccable detector (`[]`), and `git diff --check` all exited 0. React Doctor completed on changed
+> scope at **79/100**; its 71 branch-wide warnings included only pre-existing common findings
+> (`SlidingPanels` memoization/effect advice, `BoardSkeleton`'s intentional colocated helper export,
+> and a test-only children-prop warning), with no finding caused by this theme pass.
+>
+> **Open thread.** User-authored custom colors are advisory by product contract, so source code can
+> guarantee correct semantic pairing but cannot guarantee that an arbitrary imported pair itself
+> meets WCAG. A live WebKitGTK pass across Soloist Default light/dark and one custom theme remains
+> pending, so this checkpoint is not `Verified`; overall Phase 11 remains **In progress**.
+>
+> **Next session should start with:** run `just dev-alongside` and inspect common board controls,
+> card hover/press/focus, disabled detail actions, and error/retry notices in Soloist Default light,
+> Soloist Default dark, and one custom theme. Confirm small labels/icons and focus rings remain visible
+> before accepting the visual checkpoint.
+
 > **NEWEST (2026-09-08): TODO/SCRATCHPAD CARD METADATA + CREATE-PANE UX — `Done — pending
 > verify`, uncommitted on `feat/todo-workspace-ux` (PR #200).** Todo cards and detail headers now
 > show a stable `Todo #N` identity token. Blocked relationships use the existing semantic warning

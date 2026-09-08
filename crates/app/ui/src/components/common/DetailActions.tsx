@@ -53,7 +53,7 @@ export function DetailActions({ actions, primary, menuTooltip }: DetailActionsPr
                 variant="ghost"
                 size="icon-sm"
                 aria-label={menuTooltip}
-                className={cn("text-muted-foreground", MENU_BELOW)}
+                className={cn("text-icon-muted", MENU_BELOW)}
               >
                 <MoreHorizontal aria-hidden />
               </Button>
@@ -68,6 +68,7 @@ export function DetailActions({ actions, primary, menuTooltip }: DetailActionsPr
                 key={action.menuLabel}
                 onSelect={action.onSelect}
                 disabled={action.disabled}
+                className="data-disabled:text-text-muted data-disabled:opacity-100"
               >
                 <action.icon aria-hidden /> {action.menuLabel}
               </DropdownMenuItem>
@@ -97,7 +98,7 @@ function InlineAction({ action }: { action: DetailAction }) {
           onClick={action.onSelect}
           disabled={action.disabled}
           aria-label={action.label}
-          className="text-muted-foreground"
+          className="text-icon-muted"
         >
           <Icon aria-hidden />
         </Button>

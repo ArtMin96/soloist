@@ -37,7 +37,8 @@ export function TagFilterChips({ tags, active, onToggle }: TagFilterChipsProps) 
               // a pressed Radix `Toggle`) raises this rule's specificity above every base selector it
               // could otherwise tie with, so the selected fill always wins.
               "data-[state=on]:aria-pressed:bg-[var(--sidebar-sel-fill)] data-[state=on]:aria-pressed:text-foreground",
-              !isActive && "text-muted-foreground hover:bg-sidebar-accent",
+              !isActive &&
+                "text-secondary-label hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
             )}
           >
             {tag}
