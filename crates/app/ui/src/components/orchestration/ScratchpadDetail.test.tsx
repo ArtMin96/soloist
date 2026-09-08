@@ -156,7 +156,12 @@ describe("ScratchpadDetail", () => {
     expect(header().querySelector(`[${SCRATCHPAD_HANDLE_ATTRIBUTE}]`)?.textContent).toBe(
       "release-plan",
     );
-    expect(header().querySelector(`[${SCRATCHPAD_REVISION_ATTRIBUTE}]`)?.textContent).toBe("r7");
+    expect(within(header()).getByText("Handle")).toBeTruthy();
+    expect(within(header()).getByText("Updated")).toBeTruthy();
+    const heading = within(header()).getByRole("heading", { level: 2 });
+    const revision = header().querySelector(`[${SCRATCHPAD_REVISION_ATTRIBUTE}]`);
+    expect(revision?.textContent).toBe("Rev 7");
+    expect(revision?.parentElement).toBe(heading.nextElementSibling);
     expect(within(header()).getByText("5 min ago")).toBeTruthy();
     expect(within(header()).getByText("infra")).toBeTruthy();
   });

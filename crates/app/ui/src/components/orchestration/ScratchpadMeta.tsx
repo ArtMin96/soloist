@@ -1,9 +1,10 @@
+import { Clock3, Hash } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { formatUpdatedAt } from "@/lib/format";
-import { distinctHandle } from "@/lib/humanize";
+import { cn } from "@/lib/utils";
 import type { ScratchpadSummary } from "@/domain";
 
-/** The raw handle beside a humanized title, present only when the two read differently. */
+/** The raw handle beside a humanized title. */
 export const SCRATCHPAD_HANDLE_ATTRIBUTE = "data-scratchpad-handle";
 /** The revision the document currently sits at. */
 export const SCRATCHPAD_REVISION_ATTRIBUTE = "data-scratchpad-revision";
@@ -19,54 +20,86 @@ interface ScratchpadMetaProps {
   pad: ScratchpadSummary;
   /** The clock reading recency is measured against — passed in so the rail stays pure. */
   now: number;
+  variant?: "card" | "detail";
+}
+
+/** The revision token shared by scratchpad cards and detail headers. */
+export function ScratchpadRevision({ revision }: { revision: number }) {
+  return (
+    <Badge
+      {...{ [SCRATCHPAD_REVISION_ATTRIBUTE]: "" }}
+      variant="muted"
+      className="shrink-0 bg-toolbar-control font-mono tabular-nums text-toolbar-control-foreground"
+    >
+      Rev {revision}
+    </Badge>
+  );
 }
 
 /**
- * Everything a scratchpad says about itself that is not its title: its handle, its revision, when it
- * was last written and whether it is archived. A fragment rather than a box, because the card lays
- * these out on a truncating line and the detail header lays them out in a wrapping rail — the chips
- * are what must not differ between the two, not the spacing around them.
+ * The scratchpad's address and recency as a compact, icon-led metadata rail.
  */
-export function ScratchpadMeta({ pad, now }: ScratchpadMetaProps) {
-  const handle = distinctHandle(pad.name);
+export function ScratchpadMeta({ pad, now, variant = "detail" }: ScratchpadMetaProps) {
   const updated = formatUpdatedAt(pad.updated_at, now);
+  const handle = (
+    <span
+      {...{ [SCRATCHPAD_HANDLE_ATTRIBUTE]: "" }}
+      title={`Handle: ${pad.name}`}
+      className={cn("min-w-0 truncate font-mono", variant === "card" ? "type-label" : "type-body")}
+    >
+      {pad.name}
+    </span>
+  );
+  const updatedAt = updated ? (
+    <time
+      {...{ [SCRATCHPAD_UPDATED_ATTRIBUTE]: "" }}
+      dateTime={new Date(pad.updated_at).toISOString()}
+    >
+      {updated}
+    </time>
+  ) : (
+    <span {...{ [SCRATCHPAD_UPDATED_ATTRIBUTE]: "" }}>Not recorded</span>
+  );
+  const archived = pad.archived ? (
+    <Badge {...{ [SCRATCHPAD_ARCHIVED_ATTRIBUTE]: "" }} variant="muted" className="shrink-0">
+      {ARCHIVED_LABEL}
+    </Badge>
+  ) : null;
 
-  return (
-    <>
-      {handle && (
-        <span
-          {...{ [SCRATCHPAD_HANDLE_ATTRIBUTE]: "" }}
-          title={`Handle: ${handle}`}
-          className="type-label min-w-0 shrink truncate font-mono text-muted-foreground"
-        >
+  if (variant === "card") {
+    return (
+      <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <Hash aria-hidden className="size-3.5 shrink-0 text-accent" />
+          <span className="sr-only">Handle </span>
           {handle}
         </span>
-      )}
-
-      <span
-        {...{ [SCRATCHPAD_REVISION_ATTRIBUTE]: "" }}
-        className="type-label shrink-0 font-mono tabular-nums text-muted-foreground"
-      >
-        r{pad.revision}
+        <span className="type-label flex shrink-0 items-center gap-1.5">
+          <Clock3 aria-hidden className="size-3.5 shrink-0" />
+          <span className="sr-only">Updated </span>
+          {updatedAt}
+        </span>
+        {archived}
       </span>
+    );
+  }
 
-      {/* A document written before the core recorded write times has no stamp to show, and a
-          fallback would date it to 1970 — so nothing is rendered rather than a wrong time. */}
-      {updated && (
-        <time
-          {...{ [SCRATCHPAD_UPDATED_ATTRIBUTE]: "" }}
-          dateTime={new Date(pad.updated_at).toISOString()}
-          className="type-label shrink-0 text-muted-foreground"
-        >
-          {updated}
-        </time>
-      )}
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 text-muted-foreground">
+      <dl className="contents">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <dt className="sr-only">Handle</dt>
+          <Hash aria-hidden className="size-3.5 shrink-0 text-accent" />
+          <dd className="min-w-0">{handle}</dd>
+        </div>
 
-      {pad.archived && (
-        <Badge {...{ [SCRATCHPAD_ARCHIVED_ATTRIBUTE]: "" }} variant="muted" className="shrink-0">
-          {ARCHIVED_LABEL}
-        </Badge>
-      )}
-    </>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <dt className="sr-only">Updated</dt>
+          <Clock3 aria-hidden className="size-3.5 shrink-0" />
+          <dd className="type-body">{updatedAt}</dd>
+        </div>
+      </dl>
+      {archived}
+    </div>
   );
 }

@@ -49,6 +49,21 @@ describe("ScratchpadCard", () => {
     );
   });
 
+  it("separates labeled metadata from the title line with button-safe phrasing content", () => {
+    card();
+
+    const title = document.querySelector(`[${SCRATCHPAD_TITLE_ATTRIBUTE}]`) as HTMLElement;
+    const metadata = document.querySelector(`[${SCRATCHPAD_HANDLE_ATTRIBUTE}]`)?.parentElement
+      ?.parentElement as HTMLElement;
+    expect(metadata.previousElementSibling).toBe(title.parentElement);
+    expect(title.parentElement?.querySelector("[data-scratchpad-revision]")?.textContent).toBe(
+      "Rev 3",
+    );
+    expect(within(metadata).getByText("Handle")).toBeTruthy();
+    expect(within(metadata).getByText("Updated")).toBeTruthy();
+    expect(trigger().querySelector("div, dl, dt, dd")).toBeNull();
+  });
+
   it("carries a second line only when the body has a gist to show", () => {
     card({ pad: pad({ gist: "" }) });
     expect(gist()).toBeNull();

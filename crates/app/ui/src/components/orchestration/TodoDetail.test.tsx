@@ -228,9 +228,9 @@ describe("TodoDetail", () => {
     for (const row of rows) {
       expect(row.className).not.toContain("items-baseline");
     }
-    // The title is alone on its line, so nothing shares a row with it to disagree about.
+    // The title shares one deliberate row with the stable identity token.
     const title = screen.getByRole("heading", { level: 2 });
-    expect(title.parentElement).toBe(headerBands());
+    expect(title.parentElement?.parentElement).toBe(headerBands());
   });
 
   // The pinned header and the document scrolling under it are held to one column, so they resolve
@@ -249,10 +249,10 @@ describe("TodoDetail", () => {
     });
 
     const rail = statusChip().parentElement as HTMLElement;
-    expect(rail.textContent).toContain("#1");
-    expect(rail.textContent).toContain("1 unmet blocker");
+    expect(header().textContent).toContain("Todo #1");
+    expect(rail.textContent).toContain("Blocked by#2");
     expect(statusChip().getAttribute("data-slot")).toBe("badge");
-    expect(within(rail).getByText("1 unmet blocker").getAttribute("data-slot")).toBe("badge");
+    expect(rail.querySelector("[data-todo-blockers]")?.className).toContain("bg-warning-surface");
     expect(within(rail).getByText("infra").getAttribute("data-slot")).toBe("badge");
   });
 
@@ -321,7 +321,7 @@ describe("TodoDetail", () => {
   it("sets the id in mono, matching how the list row prints the same value", () => {
     panel({ todo: todo({ id: 42 }) });
 
-    const reference = screen.getByText("#42");
+    const reference = screen.getByText("Todo #42");
     expect(reference.className).toContain("font-mono");
     expect(reference.className).toContain("tabular-nums");
   });
@@ -433,8 +433,10 @@ describe("TodoDetail", () => {
     const unmet = rows.find((row) => row.textContent?.includes("Todo number 3")) as HTMLElement;
 
     expect(within(met).getByText("done")).toBeTruthy();
+    expect(within(met).getByText("Todo #2")).toBeTruthy();
     expect(within(met).getByText("Todo number 2").className).not.toContain("line-through");
     expect(within(unmet).getByText("open")).toBeTruthy();
-    expect(screen.getByText("1 unmet blocker")).toBeTruthy();
+    expect(within(unmet).getByText("Todo #3")).toBeTruthy();
+    expect(document.querySelector("[data-todo-blockers]")?.textContent).toBe("Blocked by#3");
   });
 });

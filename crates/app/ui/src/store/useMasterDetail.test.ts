@@ -13,6 +13,7 @@ const PROJECT = 1;
 
 /** How the stand-in board addresses one of its rows — the hook is told this through `rowTrigger`. */
 const ROW_ATTRIBUTE = "data-row";
+const CREATE_ATTRIBUTE = "data-create";
 
 afterEach(() => {
   cleanup();
@@ -24,6 +25,9 @@ afterEach(() => {
 function panels(keys: number[]) {
   const list = document.createElement("div");
   list.setAttribute(PANEL_ATTRIBUTE, "list");
+  const create = document.createElement("button");
+  create.setAttribute(CREATE_ATTRIBUTE, "");
+  list.append(create);
   for (const key of keys) {
     const row = document.createElement("button");
     row.setAttribute(ROW_ATTRIBUTE, String(key));
@@ -40,6 +44,7 @@ function panels(keys: number[]) {
 
   return {
     back,
+    create,
     row: (key: number) =>
       list.querySelector<HTMLElement>(`[${ROW_ATTRIBUTE}="${key}"]`) as HTMLElement,
   };
@@ -51,6 +56,7 @@ function board(overrides: Partial<MasterDetailOptions<number>> = {}) {
     ledger: createNavigationLedger(),
     present: () => true,
     rowTrigger: (key) => `[${ROW_ATTRIBUTE}="${key}"]`,
+    createTrigger: `[${CREATE_ATTRIBUTE}]`,
     ...overrides,
   };
 
@@ -92,6 +98,23 @@ describe("useMasterDetail", () => {
     // The list goes inert the moment the detail shows; focus left behind it would fall to the
     // document body and restart keyboard traversal at the top of the app.
     expect(document.activeElement).toBe(fixture.back);
+  });
+
+  it("hands the pane to creation and returns focus to the control that opened it", () => {
+    const fixture = panels([1, 2]);
+    const view = board();
+
+    act(() => view.result.current.startCreate());
+
+    expect(view.result.current.showing).toBe("detail");
+    expect(view.result.current.creating).toBe(true);
+    expect(view.result.current.detailKey).toBeNull();
+    expect(document.activeElement).toBe(fixture.back);
+
+    act(() => view.result.current.back());
+
+    expect(view.result.current.showing).toBe("list");
+    expect(document.activeElement).toBe(fixture.create);
   });
 
   it("keeps the key rendered until the panel leaving has settled, then releases it once", () => {

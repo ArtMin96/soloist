@@ -7,6 +7,7 @@ import {
   SCRATCHPAD_REVISION_ATTRIBUTE,
   SCRATCHPAD_UPDATED_ATTRIBUTE,
   ScratchpadMeta,
+  ScratchpadRevision,
 } from "@/components/orchestration/ScratchpadMeta";
 import type { ScratchpadSummary } from "@/domain";
 
@@ -35,22 +36,21 @@ const handle = () => document.querySelector(`[${SCRATCHPAD_HANDLE_ATTRIBUTE}]`);
 const updated = () => document.querySelector(`[${SCRATCHPAD_UPDATED_ATTRIBUTE}]`);
 
 describe("ScratchpadMeta", () => {
-  // A name the user wrote is its own handle; printing it twice beside a title that reads identically
-  // is noise, so the handle earns its place only when humanizing actually changed something.
-  it("shows the handle only when the title no longer reads as it", () => {
+  it("always labels the raw handle, including when it reads like the title", () => {
     rail({ name: "research" });
-    expect(handle()).toBeNull();
+    expect(screen.getByText("Handle")).toBeTruthy();
+    expect(handle()?.textContent).toBe("research");
     cleanup();
 
     rail({ name: "release-plan" });
     expect(handle()?.textContent).toBe("release-plan");
   });
 
-  it("sets the revision in mono so digits align between rows", () => {
-    rail({ revision: 12 });
+  it("keeps the revision in a compact mono token", () => {
+    render(<ScratchpadRevision revision={12} />);
 
     const revision = document.querySelector(`[${SCRATCHPAD_REVISION_ATTRIBUTE}]`) as HTMLElement;
-    expect(revision.textContent).toBe("r12");
+    expect(revision.textContent).toBe("Rev 12");
     expect(revision.className).toContain("font-mono");
     expect(revision.className).toContain("tabular-nums");
   });
@@ -58,17 +58,26 @@ describe("ScratchpadMeta", () => {
   it("names how long ago the body was written", () => {
     rail({ updated_at: NOW - 5 * MINUTE });
 
+    expect(screen.getByText("Updated")).toBeTruthy();
     expect(updated()?.textContent).toBe("5 min ago");
   });
 
   // A scratchpad written before the core recorded write times carries no stamp at all. Rendering the
   // element anyway would date every such document to 1970 — an absent time is not a write at the epoch.
-  it("renders no time at all for a document that carries no write time", () => {
+  it("says when a document carries no recorded write time without inventing a date", () => {
     rail({ updated_at: 0 });
 
-    expect(updated()).toBeNull();
+    expect(updated()?.textContent).toBe("Not recorded");
     expect(document.querySelector("time")).toBeNull();
     expect(screen.queryByText(/1970/)).toBeNull();
+  });
+
+  it("uses compact values on cards and roomier values in detail", () => {
+    const { rerender } = render(<ScratchpadMeta pad={pad()} now={NOW} variant="card" />);
+    expect(handle()?.className).toContain("type-label");
+
+    rerender(<ScratchpadMeta pad={pad()} now={NOW} variant="detail" />);
+    expect(handle()?.className).toContain("type-body");
   });
 
   it("marks an archived scratchpad and leaves an active one unmarked", () => {

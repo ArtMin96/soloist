@@ -1,4 +1,4 @@
-import { Check, Lock, ShieldAlert } from "lucide-react";
+import { Check, Lock } from "lucide-react";
 import {
   DETAIL_DONE_ATTRIBUTE,
   DetailBackButton,
@@ -13,11 +13,12 @@ import { WELL } from "@/components/common/Well";
 import { MarkdownView } from "@/components/editor/MarkdownView";
 import { CommentThread } from "@/components/orchestration/CommentThread";
 import { TodoActions } from "@/components/orchestration/TodoActions";
+import { TodoBlockerGate, TodoIdentity } from "@/components/orchestration/TodoBlockerGate";
 import { TodoEditor, type TodoConflict } from "@/components/orchestration/TodoEditor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { humanizeName } from "@/lib/humanize";
-import { TODO_STATUS, TODO_STATUS_ICON, TODO_STATUS_TONE, unmetBlockerLabel } from "@/lib/todo";
+import { TODO_STATUS, TODO_STATUS_ICON, TODO_STATUS_TONE } from "@/lib/todo";
 import { cn } from "@/lib/utils";
 import type { SaveOutcome } from "@/store/saveOutcome";
 import type { ScratchpadSummary, TodoDoc, TodoView } from "@/domain";
@@ -107,7 +108,14 @@ export function TodoDetail({
             />
           )
         }
-        title={todo.doc.title}
+        title={
+          <div className="flex min-w-0 items-start gap-2">
+            <h2 className="type-title min-w-0 flex-1 font-[560] tracking-[var(--tracking-title)] text-pretty break-words text-foreground @max-[16rem]/detail-header:line-clamp-3">
+              {todo.doc.title}
+            </h2>
+            <TodoIdentity id={todo.id} />
+          </div>
+        }
         meta={<TodoMetaRail todo={todo} />}
       />
 
@@ -162,10 +170,6 @@ function TodoMetaRail({ todo }: { todo: TodoView }) {
   const StatusIcon = TODO_STATUS_ICON[todo.doc.status];
   return (
     <div className="flex min-h-6 flex-wrap items-center gap-x-2.5 gap-y-1.5">
-      <span className="type-label shrink-0 font-mono tabular-nums text-muted-foreground">
-        #{todo.id}
-      </span>
-
       {/* The tone dresses the glyph and the chip's tint; the label stays ink, because a
           `--status-*` hue measures as low as 2.48:1 and cannot carry text. */}
       <Badge
@@ -180,12 +184,7 @@ function TodoMetaRail({ todo }: { todo: TodoView }) {
 
       {/* The gate on the primary action sitting two bands above, so it belongs in the masthead
           rather than only in the Blockers section further down. */}
-      {todo.blocked_by.length > 0 && (
-        <Badge variant="outline" className="shrink-0">
-          <ShieldAlert aria-hidden data-icon="inline-start" className="text-status-attention" />
-          {unmetBlockerLabel(todo.blocked_by.length)}
-        </Badge>
-      )}
+      <TodoBlockerGate blockerIds={todo.blocked_by} variant="detail" className="shrink-0" />
 
       <TagList tags={todo.tags} wrap />
     </div>
@@ -263,15 +262,22 @@ function TodoBlockers({
       <div className={cn(WELL, "overflow-hidden")}>
         <ul className="flex max-h-[13.125rem] flex-col divide-y divide-border overflow-y-auto">
           {todo.blockers.map((id) => (
-            <li key={id} className="flex items-center gap-2 px-3 py-2">
-              <span
-                className={cn(
-                  "type-body min-w-0 flex-1 truncate",
-                  unmet.has(id) ? "text-foreground" : "text-muted-foreground",
+            <li key={id} className="flex items-center gap-3 px-3 py-2">
+              <div className="flex min-w-0 flex-1 items-baseline gap-2">
+                <span className="type-label shrink-0 font-mono tabular-nums text-muted-foreground">
+                  Todo #{id}
+                </span>
+                {titleOf(id) && (
+                  <span
+                    className={cn(
+                      "type-body min-w-0 truncate",
+                      unmet.has(id) ? "text-foreground" : "text-muted-foreground",
+                    )}
+                  >
+                    {titleOf(id)}
+                  </span>
                 )}
-              >
-                {titleOf(id) ?? `Todo #${id}`}
-              </span>
+              </div>
               <Badge variant={unmet.has(id) ? "outline" : "muted"} className="shrink-0">
                 {unmet.has(id) ? "open" : "done"}
               </Badge>

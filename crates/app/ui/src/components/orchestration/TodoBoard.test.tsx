@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { DETAIL_DONE_ATTRIBUTE } from "@/components/common/DetailPane";
 import { TodoBoard } from "@/components/orchestration/TodoBoard";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { UNLINKED_GROUP_LABEL } from "@/store/todoGrouping";
 import type { TodoActionsStore } from "@/store/useTodoActions";
 import type { TodoEditorStore } from "@/store/useTodoEditor";
+import type { SaveOutcome } from "@/store/saveOutcome";
 import type { ScratchpadRef, ScratchpadSummary, TodoDoc, TodoView } from "@/domain";
 
 // The board's own hooks are the only IPC on this surface; stubbing them keeps the test on the
@@ -34,6 +35,7 @@ const session: {
   initial: TodoDoc | null;
   baseRevision: number | null;
 } = { mode: null, editingId: null, initial: null, baseRevision: null };
+let saveOutcome: SaveOutcome = "saved";
 
 vi.mock("@/store/useTodoEditor", () => ({
   useTodoEditor: (): TodoEditorStore => {
@@ -53,7 +55,7 @@ vi.mock("@/store/useTodoEditor", () => ({
       startCreate: vi.fn(),
       editTodo: vi.fn(),
       close: () => setClosed(true),
-      save: vi.fn(),
+      save: vi.fn(async () => saveOutcome),
       reload: vi.fn(),
     };
   },
@@ -82,6 +84,7 @@ afterEach(() => {
   session.editingId = null;
   session.initial = null;
   session.baseRevision = null;
+  saveOutcome = "saved";
 });
 
 const plan: ScratchpadRef = { id: 4, name: "release-plan" };
@@ -248,17 +251,45 @@ describe("TodoBoard", () => {
     expect(screen.getByText("Ship the release")).toBeTruthy();
   });
 
-  it("offers one create action at a time — the form's Create replaces New todo, never joins it", () => {
+  it("opens creation in the detail pane and restores focus when it is cancelled", () => {
     board();
-    expect(screen.getByRole("button", { name: /New todo/ })).toBeTruthy();
+    const trigger = screen.getByRole("button", { name: /New todo/ });
 
-    session.mode = "create";
-    session.initial = { title: "", body: "", status: "open" };
-    cleanup();
+    fireEvent.click(trigger);
+
+    expect(route()).toBe("detail");
+    expect(within(panel("detail")).getByRole("heading", { name: "New todo" })).toBeTruthy();
+    expect(document.activeElement).toBe(backButton());
+
+    fireEvent.click(within(panel("detail")).getByRole("button", { name: "Cancel" }));
+
+    expect(route()).toBe("list");
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("keeps a refused create open and returns focus to New todo after a successful save", async () => {
     board();
+    const trigger = screen.getByRole("button", { name: /New todo/ });
+    fireEvent.click(trigger);
+    fireEvent.change(within(panel("detail")).getByRole("textbox", { name: "Todo title" }), {
+      target: { value: "Document the release" },
+    });
 
-    expect(screen.queryByRole("button", { name: /New todo/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /Create todo/ })).toBeTruthy();
+    saveOutcome = "refused";
+    const createButton = within(panel("detail")).getByRole("button", { name: "Create todo" });
+    fireEvent.click(createButton);
+
+    await waitFor(() => expect(createButton).toHaveProperty("disabled", false));
+    expect(route()).toBe("detail");
+    expect(within(panel("detail")).getByRole("heading", { name: "New todo" })).toBeTruthy();
+
+    saveOutcome = "saved";
+    fireEvent.click(createButton);
+
+    await waitFor(() => {
+      expect(route()).toBe("list");
+      expect(document.activeElement).toBe(trigger);
+    });
   });
 
   it("shows the empty state rather than an empty group when there are no todos", () => {
@@ -272,18 +303,6 @@ describe("TodoBoard", () => {
     board();
 
     expect(document.querySelectorAll("[data-board-toolbar]")).toHaveLength(1);
-  });
-
-  it("hides New todo from the toolbar while the create form is open", () => {
-    board();
-    expect(screen.getByRole("button", { name: /New todo/ })).toBeTruthy();
-
-    session.mode = "create";
-    session.initial = { title: "", body: "", status: "open" };
-    cleanup();
-    board();
-
-    expect(screen.queryByRole("button", { name: /New todo/ })).toBeNull();
   });
 
   it("hands the pane to a todo's detail when its card is opened", () => {

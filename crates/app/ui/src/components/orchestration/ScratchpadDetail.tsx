@@ -14,7 +14,7 @@ import { TagList } from "@/components/common/TagList";
 import { MarkdownSkeleton } from "@/components/editor/MarkdownSkeleton";
 import { MarkdownView } from "@/components/editor/MarkdownView";
 import { ScratchpadEditor } from "@/components/orchestration/ScratchpadEditor";
-import { ScratchpadMeta } from "@/components/orchestration/ScratchpadMeta";
+import { ScratchpadMeta, ScratchpadRevision } from "@/components/orchestration/ScratchpadMeta";
 import { ScratchpadTitle } from "@/components/orchestration/ScratchpadTitle";
 import { Button } from "@/components/ui/button";
 import { humanizeName } from "@/lib/humanize";
@@ -120,8 +120,9 @@ export function ScratchpadDetail({
           )
         }
         meta={
-          <div className="flex min-h-6 flex-wrap items-center gap-x-2.5 gap-y-1.5">
-            <ScratchpadMeta pad={pad} now={now} />
+          <div className="flex flex-wrap items-center gap-2">
+            <ScratchpadRevision revision={pad.revision} />
+            <ScratchpadMeta pad={pad} now={now} variant="detail" />
             <TagList tags={pad.tags} wrap />
           </div>
         }

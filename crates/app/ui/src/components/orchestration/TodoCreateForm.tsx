@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { CreatePane } from "@/components/common/CreatePane";
 import { Button } from "@/components/ui/button";
 import { TodoDocFields } from "@/components/orchestration/TodoDocFields";
 import type { SaveOutcome } from "@/store/saveOutcome";
@@ -15,8 +16,7 @@ interface TodoCreateFormProps {
   error: string | null;
 }
 
-// The inline new-todo form at the top of the board (a progressive affordance, not a modal). It
-// authors a whole document with the shared fields and posts it explicitly on Create — creation has
+// The new-todo form fills the board's detail pane and posts explicitly on Create — creation has
 // no prior revision to guard, so unlike editing it is a single deliberate write, not autosave. The
 // title is required (the core refuses a blank one); the body is optional and may be seeded from the
 // default todo template server-side; the scratchpad starts at None and is the author's to opt into. On success the board closes the form; a rejection stays open
@@ -39,37 +39,39 @@ export function TodoCreateForm({ onCreate, scratchpads, onCancel, error }: TodoC
   };
 
   return (
-    <div className="flex flex-col gap-2 border-b bg-sidebar-accent/40 p-3">
-      {error && (
-        <p className="type-body text-destructive" aria-live="polite">
-          {error}
-        </p>
-      )}
-
-      <TodoDocFields
-        title={title}
-        status={status}
-        initialBody=""
-        titleId="todo-create-title"
-        scratchpads={scratchpads}
-        scratchpad={scratchpad}
-        onTitleChange={setTitle}
-        onStatusChange={setStatus}
-        onScratchpadChange={setScratchpad}
-        onBodyChange={(markdown) => {
-          bodyRef.current = markdown;
+    <CreatePane subject="todo" destination="todos" error={error} onBack={onCancel}>
+      <form
+        className="flex min-h-0 flex-1 flex-col gap-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          create();
         }}
-        onSaveShortcut={create}
-      />
+      >
+        <TodoDocFields
+          title={title}
+          status={status}
+          initialBody=""
+          titleId="todo-create-title"
+          scratchpads={scratchpads}
+          scratchpad={scratchpad}
+          onTitleChange={setTitle}
+          onStatusChange={setStatus}
+          onScratchpadChange={setScratchpad}
+          onBodyChange={(markdown) => {
+            bodyRef.current = markdown;
+          }}
+          onSaveShortcut={create}
+        />
 
-      <footer className="flex items-center justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button size="sm" onClick={create} disabled={!canCreate}>
-          {busy ? "Creating…" : "Create todo"}
-        </Button>
-      </footer>
-    </div>
+        <footer className="flex items-center justify-end gap-2 border-t pt-3">
+          <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button type="submit" size="sm" disabled={!canCreate}>
+            {busy ? "Creating…" : "Create todo"}
+          </Button>
+        </footer>
+      </form>
+    </CreatePane>
   );
 }

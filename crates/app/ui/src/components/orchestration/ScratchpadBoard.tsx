@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { BOARD_CREATE_ATTRIBUTE } from "@/components/common/BoardToolbar";
 import { CARD_TRIGGER_ATTRIBUTE } from "@/components/common/CardRow";
 import { CollapsibleGroup } from "@/components/common/CollapsibleGroup";
 import { SlidingPanels } from "@/components/common/SlidingPanels";
@@ -82,7 +83,6 @@ export function ScratchpadBoard({
   const rootRef = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState<ScratchpadFilter>(EMPTY_SCRATCHPAD_FILTER);
   const [sort, setSort] = useState<ScratchpadSort>(DEFAULT_SORT);
-  const [creating, setCreating] = useState(false);
   const [mode, setMode] = useState<PaneMode>("read");
   const [collapsed, setCollapsed] = useCollapseState();
 
@@ -110,6 +110,7 @@ export function ScratchpadBoard({
     ledger,
     present: (id) => scratchpads.some((pad) => pad.id === id),
     rowTrigger: (id) => `[${SCRATCHPAD_ROW_ID_ATTRIBUTE}="${id}"] [${CARD_TRIGGER_ATTRIBUTE}]`,
+    createTrigger: `[${BOARD_CREATE_ATTRIBUTE}="scratchpad"]`,
     focusKey: scratchpads.find((pad) => pad.name === focusName)?.id,
     focusNonce,
     onOpen: (id) => {
@@ -153,15 +154,14 @@ export function ScratchpadBoard({
   useScratchpadHotkeys(rootRef, archiveDetail);
 
   const startCreate = () => {
-    master.showList();
-    setCreating(true);
+    master.startCreate();
   };
 
   // The form stays open on a refusal — a name already taken is the core's to reject, and the draft
   // the user typed is not thrown away over it.
   const create = async (name: string, body: string) => {
     const outcome = await actions.create(name, body);
-    if (outcome === "saved") setCreating(false);
+    if (outcome === "saved") master.back();
     return outcome;
   };
 
@@ -201,16 +201,8 @@ export function ScratchpadBoard({
         onSortChange={setSort}
         shown={visible.length}
         total={scratchpads.length}
-        onCreate={creating ? undefined : startCreate}
+        onCreate={startCreate}
       />
-
-      {creating && (
-        <ScratchpadCreateForm
-          onCreate={create}
-          onCancel={() => setCreating(false)}
-          error={actions.createError}
-        />
-      )}
 
       <div className="min-h-0 flex-1 overflow-auto">
         {visible.length === 0 ? (
@@ -258,23 +250,31 @@ export function ScratchpadBoard({
         showing={master.showing}
         list={list}
         detail={
-          detailPad && (
-            <ScratchpadDetail
-              pad={detailPad}
-              document={documentRead}
-              onRetry={editor.reload}
-              now={now}
-              onBack={master.back}
-              onStartEdit={() => setMode("edit")}
-              onArchive={() => actions.archive(detailPad.name, !detailPad.archived)}
-              onCopyLink={() => editor.copyLink(detailPad.id)}
-              onExport={() => actions.exportMarkdown(detailPad.name, bodyRef.current)}
-              onCopyMarkdown={() => actions.copyMarkdown(detailPad.name, bodyRef.current)}
-              // While editing, the editor states its own refusals beside the text; the pane's line
-              // then carries only what the header's own actions were refused.
-              error={actions.error ?? (mode === "read" ? editor.error : null)}
-              edit={editState}
+          master.creating ? (
+            <ScratchpadCreateForm
+              onCreate={create}
+              onCancel={master.back}
+              error={actions.createError}
             />
+          ) : (
+            detailPad && (
+              <ScratchpadDetail
+                pad={detailPad}
+                document={documentRead}
+                onRetry={editor.reload}
+                now={now}
+                onBack={master.back}
+                onStartEdit={() => setMode("edit")}
+                onArchive={() => actions.archive(detailPad.name, !detailPad.archived)}
+                onCopyLink={() => editor.copyLink(detailPad.id)}
+                onExport={() => actions.exportMarkdown(detailPad.name, bodyRef.current)}
+                onCopyMarkdown={() => actions.copyMarkdown(detailPad.name, bodyRef.current)}
+                // While editing, the editor states its own refusals beside the text; the pane's line
+                // then carries only what the header's own actions were refused.
+                error={actions.error ?? (mode === "read" ? editor.error : null)}
+                edit={editState}
+              />
+            )
           )
         }
         onSettled={master.onSettled}

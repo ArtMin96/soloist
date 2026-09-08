@@ -1,6 +1,6 @@
 import { CardRow } from "@/components/common/CardRow";
 import { TagList } from "@/components/common/TagList";
-import { ScratchpadMeta } from "@/components/orchestration/ScratchpadMeta";
+import { ScratchpadMeta, ScratchpadRevision } from "@/components/orchestration/ScratchpadMeta";
 import { humanizeName } from "@/lib/humanize";
 import type { ScratchpadSummary } from "@/domain";
 
@@ -26,16 +26,16 @@ export function ScratchpadCard({ pad, now, onOpen }: ScratchpadCardProps) {
   return (
     <CardRow onOpen={onOpen}>
       <span className="flex w-full min-w-0 items-center gap-2">
-        {/* The title is what yields on this line: the rail's chips are short fixed strings, and a
-            revision or a stamp clipped mid-digit is one nobody can read. */}
         <span
           {...{ [SCRATCHPAD_TITLE_ATTRIBUTE]: "" }}
           className="type-body min-w-0 flex-1 truncate font-[550] text-foreground"
         >
           {humanizeName(pad.name)}
         </span>
-        <ScratchpadMeta pad={pad} now={now} />
+        <ScratchpadRevision revision={pad.revision} />
       </span>
+
+      <ScratchpadMeta pad={pad} now={now} variant="card" />
 
       {pad.gist && (
         <span

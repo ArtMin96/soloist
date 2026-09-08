@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { CreatePane } from "@/components/common/CreatePane";
 import { LazyRichTextEditor } from "@/components/editor/LazyRichTextEditor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,8 +20,8 @@ interface ScratchpadCreateFormProps {
 }
 
 /**
- * The inline new-scratchpad form at the top of the board (a progressive affordance, not a modal). It
- * posts explicitly on Create: a document that does not exist yet has no revision to guard, so unlike
+ * The new-scratchpad form fills the board's detail pane and posts explicitly on Create. A document
+ * that does not exist yet has no revision to guard, so unlike
  * editing this is a single deliberate write rather than autosave. A name already taken is the core's
  * refusal to make, not this form's to guess, so a rejection leaves the draft exactly as it was with
  * the reason above it.
@@ -41,38 +42,47 @@ export function ScratchpadCreateForm({ onCreate, onCancel, error }: ScratchpadCr
   };
 
   return (
-    <div className="flex flex-col gap-2 border-b bg-sidebar-accent/40 p-3">
-      {error && (
-        <p className="type-body text-destructive" aria-live="polite">
-          {error}
-        </p>
-      )}
-
-      <Input
-        value={name}
-        aria-label={NAME_FIELD_LABEL}
-        placeholder={NAME_FIELD_LABEL}
-        onChange={(event) => setName(event.target.value)}
-      />
-
-      <LazyRichTextEditor
-        initialMarkdown=""
-        ariaLabel={BODY_FIELD_LABEL}
-        outline
-        onChange={(markdown) => {
-          bodyRef.current = markdown;
+    <CreatePane subject="scratchpad" destination="scratchpads" error={error} onBack={onCancel}>
+      <form
+        className="flex min-h-0 flex-1 flex-col gap-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          create();
         }}
-        onSaveShortcut={create}
-      />
+      >
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="scratchpad-create-name" className="type-label text-muted-foreground">
+            Name
+          </label>
+          <Input
+            id="scratchpad-create-name"
+            name="name"
+            value={name}
+            aria-label={NAME_FIELD_LABEL}
+            placeholder="release-plan"
+            onChange={(event) => setName(event.target.value)}
+          />
+        </div>
 
-      <footer className="flex items-center justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button size="sm" onClick={create} disabled={!canCreate}>
-          {busy ? "Creating…" : "Create scratchpad"}
-        </Button>
-      </footer>
-    </div>
+        <LazyRichTextEditor
+          initialMarkdown=""
+          ariaLabel={BODY_FIELD_LABEL}
+          outline
+          onChange={(markdown) => {
+            bodyRef.current = markdown;
+          }}
+          onSaveShortcut={create}
+        />
+
+        <footer className="flex items-center justify-end gap-2 border-t pt-3">
+          <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button type="submit" size="sm" disabled={!canCreate}>
+            {busy ? "Creating…" : "Create scratchpad"}
+          </Button>
+        </footer>
+      </form>
+    </CreatePane>
   );
 }

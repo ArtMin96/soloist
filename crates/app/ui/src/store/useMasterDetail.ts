@@ -37,6 +37,8 @@ export interface MasterDetailOptions<Key> {
   present: (key: Key) => boolean;
   /** Selector, inside the list panel, of the control focus returns to on Back. */
   rowTrigger: (key: Key) => string;
+  /** Selector, inside the list panel, of the control focus returns to after creating or cancelling. */
+  createTrigger?: string;
   focusKey?: Key;
   focusNonce?: number;
   /** Before the detail opens on `key` — a row activation or an inbound nonce. */
@@ -51,11 +53,12 @@ export interface MasterDetailOptions<Key> {
 export interface MasterDetail<Key> {
   /** The key the detail panel renders; retained through the slide-out until `onSettled`. */
   detailKey: Key | null;
+  /** Whether the detail panel carries the create form. */
+  creating: boolean;
   showing: SlidingPanel;
   open: (key: Key) => void;
+  startCreate: () => void;
   back: () => void;
-  /** List on screen with no focus move — for a control that opens something else on the list. */
-  showList: () => void;
   onSettled: () => void;
 }
 
@@ -63,15 +66,14 @@ export interface MasterDetail<Key> {
  * The detail panel's target. `showing` is the route — false while the panel slides back out, which
  * is what keeps the subject rendered for the length of that movement rather than blanking on the way.
  */
-interface DetailTarget<Key> {
-  key: Key;
-  showing: boolean;
-}
+type DetailTarget<Key> =
+  | { kind: "item"; key: Key; showing: boolean }
+  | { kind: "create"; showing: boolean };
 
 /** Where focus goes when a route change commits, and whether the target has to be scrolled to. */
 interface PendingFocus {
   panel: SlidingPanel;
-  within: string;
+  within?: string;
   scroll: boolean;
 }
 
@@ -82,7 +84,7 @@ interface PendingFocus {
 // and neither call can drag the panel track sideways.
 function focusPanel({ panel, within, scroll }: PendingFocus) {
   const root = document.querySelector<HTMLElement>(`[${PANEL_ATTRIBUTE}="${panel}"]`);
-  const target = root?.querySelector<HTMLElement>(within) ?? root;
+  const target = (within ? root?.querySelector<HTMLElement>(within) : null) ?? root;
   // Only a row in a list the reader has scrolled can be out of view. A control at the top of a
   // panel that has just arrived is already in view, and asking anyway costs a forced layout of the
   // whole page — measured in the hundred-millisecond range — in the commit before its first paint.
@@ -104,6 +106,7 @@ export function useMasterDetail<Key>({
   ledger,
   present,
   rowTrigger,
+  createTrigger,
   focusKey,
   focusNonce,
   onOpen,
@@ -118,7 +121,16 @@ export function useMasterDetail<Key>({
 
   const open = (key: Key) => {
     onOpenRef.current?.(key);
-    setDetail({ key, showing: true });
+    setDetail({ kind: "item", key, showing: true });
+    pendingFocusRef.current = {
+      panel: "detail",
+      within: `[${DETAIL_BACK_ATTRIBUTE}]`,
+      scroll: false,
+    };
+  };
+
+  const startCreate = () => {
+    setDetail({ kind: "create", showing: true });
     pendingFocusRef.current = {
       panel: "detail",
       within: `[${DETAIL_BACK_ATTRIBUTE}]`,
@@ -133,7 +145,11 @@ export function useMasterDetail<Key>({
     onLeave?.();
     showList();
     if (from != null) {
-      pendingFocusRef.current = { panel: "list", within: rowTrigger(from.key), scroll: true };
+      pendingFocusRef.current = {
+        panel: "list",
+        within: from.kind === "item" ? rowTrigger(from.key) : createTrigger,
+        scroll: from.kind === "item",
+      };
     }
   };
 
@@ -142,7 +158,7 @@ export function useMasterDetail<Key>({
   const onSettled = () => {
     if (detail == null || detail.showing) return;
     setDetail(null);
-    onDrop?.(detail.key);
+    if (detail.kind === "item") onDrop?.(detail.key);
   };
 
   // A route change is the one moment focus can be lost: the panel leaving goes inert, and focus left
@@ -162,7 +178,7 @@ export function useMasterDetail<Key>({
   // already sliding out is cleared by `onSettled` a beat later, and cutting it short would blank it
   // mid-movement. Adjusted here during render, keyed off the snapshot itself changing, so the drop
   // lands the same render the subject disappears in rather than painting a dead panel for a frame.
-  if (detail != null && detail.showing && !present(detail.key)) {
+  if (detail?.kind === "item" && detail.showing && !present(detail.key)) {
     setDetail(null);
     onLeave?.();
     onDrop?.(detail.key);
@@ -195,11 +211,12 @@ export function useMasterDetail<Key>({
   }, [focusNonce, focusKey, targetPresent, project]);
 
   return {
-    detailKey: detail?.key ?? null,
+    detailKey: detail?.kind === "item" ? detail.key : null,
+    creating: detail?.kind === "create",
     showing: detail?.showing ? "detail" : "list",
     open,
+    startCreate,
     back,
-    showList,
     onSettled,
   };
 }

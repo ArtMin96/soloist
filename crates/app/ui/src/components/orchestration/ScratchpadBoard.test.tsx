@@ -330,30 +330,36 @@ describe("ScratchpadBoard", () => {
     expect(rowNames()).toEqual(["release-notes", "rich-editor-design"]);
   });
 
-  it("offers one create action at a time, and closes the form only once a create lands", async () => {
+  it("opens creation in the detail pane and returns to the trigger only once a create lands", async () => {
     board();
-    fireEvent.click(screen.getByRole("button", { name: /New scratchpad/ }));
+    const trigger = screen.getByRole("button", { name: /New scratchpad/ });
+    fireEvent.click(trigger);
 
-    // The form's own Create is now the default action; two filled buttons would each claim to be it.
-    expect(screen.queryByRole("button", { name: /New scratchpad/ })).toBeNull();
-    fireEvent.change(screen.getByRole("textbox", { name: "New scratchpad name" }), {
-      target: { value: "fresh-notes" },
-    });
+    expect(route()).toBe("detail");
+    expect(within(panel("detail")).getByRole("heading", { name: "New scratchpad" })).toBeTruthy();
+    expect(document.activeElement).toBe(backButton());
+    fireEvent.change(
+      within(panel("detail")).getByRole("textbox", { name: "New scratchpad name" }),
+      {
+        target: { value: "fresh-notes" },
+      },
+    );
 
     createOutcome = "refused";
     fireEvent.click(screen.getByRole("button", { name: /Create scratchpad/ }));
     await waitFor(() => expect(created).toHaveLength(1));
 
     // A refusal keeps the draft on screen: the name the user typed is not thrown away.
-    expect(screen.getByRole("textbox", { name: "New scratchpad name" })).toBeTruthy();
+    expect(route()).toBe("detail");
+    expect(
+      within(panel("detail")).getByRole("textbox", { name: "New scratchpad name" }),
+    ).toBeTruthy();
 
     createOutcome = "saved";
     fireEvent.click(screen.getByRole("button", { name: /Create scratchpad/ }));
 
-    expect(await screen.findByRole("button", { name: /New scratchpad/ })).toBeTruthy();
-    expect(screen.queryByRole("textbox", { name: "New scratchpad name" })).toBeNull();
-    // Creating leaves the reader on the list — nothing was opened.
-    expect(route()).toBe("list");
+    await waitFor(() => expect(route()).toBe("list"));
+    expect(document.activeElement).toBe(trigger);
   });
 
   it("hands the pane to a scratchpad's detail when its card is opened", () => {

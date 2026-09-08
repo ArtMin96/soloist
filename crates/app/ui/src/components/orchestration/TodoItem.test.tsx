@@ -58,12 +58,7 @@ describe("TodoItem", () => {
 
     expect(document.querySelector("[data-card-row]")?.getAttribute("data-slot")).toBe("card");
     expect(document.querySelector("[data-card-trigger]")?.getAttribute("data-slot")).toBe("button");
-    for (const selector of [
-      "[data-todo-status]",
-      "[data-todo-blockers]",
-      "[data-todo-comments]",
-      "[data-tag]",
-    ]) {
+    for (const selector of ["[data-todo-status]", "[data-todo-comments]", "[data-tag]"]) {
       expect(document.querySelector(selector)?.getAttribute("data-slot")).toBe("badge");
     }
   });
@@ -102,13 +97,13 @@ describe("TodoItem", () => {
     // The meta line still clips, so it cannot spill under the sibling agent control.
     const blockers = document.querySelector("[data-todo-blockers]") as HTMLElement;
     expect(blockers.className).toContain("min-w-0");
-    expect(blockers.querySelector("span")?.className).toContain("truncate");
+    expect(blockers.querySelectorAll("span")[1]?.className).toContain("truncate");
   });
 
-  it("renders its id and its status label", () => {
+  it("labels its todo number and status", () => {
     row();
 
-    expect(screen.getByText("#1")).toBeTruthy();
+    expect(screen.getByText("Todo #1")).toBeTruthy();
     expect(screen.getByText("Open")).toBeTruthy();
   });
 
@@ -135,16 +130,22 @@ describe("TodoItem", () => {
     expect(new Set(tones).size).toBe(STATUSES.length);
   });
 
-  it("names a blocked row's unmet-blocker count with the right plurality", () => {
+  it("names the first blocking todo and summarizes the rest", () => {
     row({ todo: todo({ blockers: [2, 3], blocked_by: [2, 3], blocked: true }) });
 
-    expect(screen.getByText("2 unmet blockers")).toBeTruthy();
+    const blockers = document.querySelector("[data-todo-blockers]") as HTMLElement;
+    expect(blockers.textContent).toBe("Blocked by#2 +1");
+    expect(blockers.title).toBe("Blocked by Todo #2, Todo #3");
+    expect(blockers.getAttribute("aria-label")).toBe("Blocked by Todo #2, Todo #3");
+    expect(blockers.className).toContain("bg-warning-surface");
+    expect(blockers.className).toContain("text-warning-foreground");
+    expect(blockers.querySelector("svg")?.className.baseVal).toContain("text-warning");
   });
 
   it("renders no blocker text once nothing is unmet", () => {
     row({ todo: todo({ blockers: [2], blocked_by: [], blocked: false }) });
 
-    expect(screen.queryByText(/unmet blocker/)).toBeNull();
+    expect(screen.queryByText(/Blocked by/)).toBeNull();
   });
 
   it("opens the todo when the card is activated", () => {

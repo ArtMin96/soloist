@@ -1,7 +1,8 @@
-import { MessageSquareIcon, ShieldAlertIcon } from "lucide-react";
+import { MessageSquareIcon } from "lucide-react";
 import { TagList } from "@/components/common/TagList";
+import { TodoBlockerGate, TodoIdentity } from "@/components/orchestration/TodoBlockerGate";
 import { Badge } from "@/components/ui/badge";
-import { TODO_STATUS, TODO_STATUS_ICON, TODO_STATUS_TONE, unmetBlockerLabel } from "@/lib/todo";
+import { TODO_STATUS, TODO_STATUS_ICON, TODO_STATUS_TONE } from "@/lib/todo";
 import { cn } from "@/lib/utils";
 import type { TodoView } from "@/domain";
 
@@ -21,6 +22,7 @@ export function TodoRowSummary({ todo, done }: TodoRowSummaryProps) {
   return (
     <>
       <div className="flex w-full min-w-0 items-center gap-2">
+        <TodoIdentity id={todo.id} />
         <span
           data-todo-title
           className={cn(
@@ -43,37 +45,22 @@ export function TodoRowSummary({ todo, done }: TodoRowSummaryProps) {
         </Badge>
       </div>
 
-      <div className="flex w-full min-w-0 items-center gap-2">
-        <span
-          data-todo-ref
-          className="type-label shrink-0 font-mono tabular-nums text-muted-foreground"
-        >
-          #{todo.id}
-        </span>
-        {todo.blocked_by.length > 0 && (
-          // A shield, not the declared status's ban glyph: this is the derived gate, and the two
-          // must not wear the same mark on a row that can show both at once.
-          <Badge data-todo-blockers variant="outline" className="min-w-0 shrink">
-            <ShieldAlertIcon
-              aria-hidden
-              data-icon="inline-start"
-              className="text-status-attention"
-            />
-            <span className="min-w-0 truncate">{unmetBlockerLabel(todo.blocked_by.length)}</span>
-          </Badge>
-        )}
-        {todo.comments.length > 0 && (
-          <Badge
-            data-todo-comments
-            aria-label={`${todo.comments.length} ${todo.comments.length === 1 ? "comment" : "comments"}`}
-            variant="muted"
-            className="ml-auto shrink-0"
-          >
-            <MessageSquareIcon aria-hidden data-icon="inline-start" />
-            {todo.comments.length}
-          </Badge>
-        )}
-      </div>
+      {(todo.blocked_by.length > 0 || todo.comments.length > 0) && (
+        <div className="flex w-full min-w-0 items-center gap-2">
+          <TodoBlockerGate blockerIds={todo.blocked_by} className="shrink" />
+          {todo.comments.length > 0 && (
+            <Badge
+              data-todo-comments
+              aria-label={`${todo.comments.length} ${todo.comments.length === 1 ? "comment" : "comments"}`}
+              variant="muted"
+              className="ml-auto shrink-0"
+            >
+              <MessageSquareIcon aria-hidden data-icon="inline-start" />
+              {todo.comments.length}
+            </Badge>
+          )}
+        </div>
+      )}
 
       {todo.tags.length > 0 && (
         <span data-todo-tag-row className="flex w-full min-w-0 items-center">

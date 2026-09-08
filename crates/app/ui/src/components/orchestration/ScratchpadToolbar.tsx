@@ -1,5 +1,5 @@
 import { Plus } from "lucide-react";
-import { BoardToolbar } from "@/components/common/BoardToolbar";
+import { BOARD_CREATE_ATTRIBUTE, BoardToolbar } from "@/components/common/BoardToolbar";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -36,7 +36,7 @@ interface ScratchpadToolbarProps {
   /** How many scratchpads survive the filter, and how many exist. */
   shown: number;
   total: number;
-  /** The board's primary action; omitted while the create form is open. */
+  /** Opens the board's create pane. */
   onCreate?: () => void;
 }
 
@@ -101,7 +101,12 @@ export function ScratchpadToolbar({
       }
       primary={
         onCreate && (
-          <Button size="sm" onClick={onCreate} className="shrink-0">
+          <Button
+            {...{ [BOARD_CREATE_ATTRIBUTE]: "scratchpad" }}
+            size="sm"
+            onClick={onCreate}
+            className="shrink-0"
+          >
             <Plus aria-hidden /> New scratchpad
           </Button>
         )

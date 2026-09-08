@@ -1,4 +1,5 @@
 import { useDeferredValue, useMemo, useState } from "react";
+import { BOARD_CREATE_ATTRIBUTE } from "@/components/common/BoardToolbar";
 import { CARD_TRIGGER_ATTRIBUTE } from "@/components/common/CardRow";
 import { CollapsibleGroup } from "@/components/common/CollapsibleGroup";
 import { SlidingPanels } from "@/components/common/SlidingPanels";
@@ -15,7 +16,7 @@ import { useTodoEditor } from "@/store/useTodoEditor";
 import { groupTodosByScratchpad } from "@/store/todoGrouping";
 import { EMPTY_TODO_FILTER, filterTodos, isFiltering, type TodoFilter } from "@/store/todoFilter";
 import type { BoardView } from "@/lib/todo";
-import type { AgentNode, ScratchpadSummary, TodoView } from "@/domain";
+import type { AgentNode, ScratchpadSummary, TodoDoc, TodoView } from "@/domain";
 
 /** Namespaces this board's persisted collapse keys so they cannot collide with the sidebar's. */
 const COLLAPSE_PREFIX = "todos.scratchpad";
@@ -97,10 +98,11 @@ export function TodoBoard({
     ledger,
     present: (id) => todos.some((todo) => todo.id === id),
     rowTrigger: (id) => `[data-todo-id="${id}"] [${CARD_TRIGGER_ATTRIBUTE}]`,
+    createTrigger: `[${BOARD_CREATE_ATTRIBUTE}="todo"]`,
     focusKey: focusId,
     focusNonce,
     onOpen: endEditUnless,
-    onLeave: () => endEditUnless(null),
+    onLeave: editor.close,
   });
 
   // Resolved against the whole snapshot, never the filtered set: the toolbar's filter belongs to the
@@ -109,8 +111,14 @@ export function TodoBoard({
     master.detailKey != null ? todos.find((todo) => todo.id === master.detailKey) : undefined;
 
   const startCreate = () => {
-    master.showList();
     editor.startCreate();
+    master.startCreate();
+  };
+
+  const create = async (doc: TodoDoc, scratchpad: number | null) => {
+    const outcome = await editor.save(doc, scratchpad);
+    if (outcome === "saved") master.back();
+    return outcome;
   };
 
   // The edit surface for one todo, present only while it is the one being edited. A concurrent write
@@ -146,10 +154,6 @@ export function TodoBoard({
     </li>
   );
 
-  // The board's one accent-filled default action — and only while there is no form open, since the
-  // form's own Create is then the default and two filled buttons would each claim to be it.
-  const creating = editor.mode === "create";
-
   const list = (
     <>
       <TodoToolbar
@@ -160,17 +164,8 @@ export function TodoBoard({
         onViewChange={setView}
         shown={visible.length}
         total={todos.length}
-        onCreate={creating ? undefined : startCreate}
+        onCreate={startCreate}
       />
-
-      {creating && editor.initial && (
-        <TodoCreateForm
-          onCreate={editor.save}
-          scratchpads={scratchpads}
-          onCancel={editor.close}
-          error={editor.error}
-        />
-      )}
 
       <div className="min-h-0 flex-1 overflow-auto">
         {visible.length === 0 ? (
@@ -218,24 +213,33 @@ export function TodoBoard({
         showing={master.showing}
         list={list}
         detail={
-          detailTodo && (
-            <TodoDetail
-              todo={detailTodo}
-              onBack={master.back}
-              titleOf={titleOf}
-              lockOwnerLabel={
-                detailTodo.locked_by != null ? labelOf(detailTodo.locked_by) : undefined
-              }
-              onOpenAgent={onOpenAgent}
-              busy={actions.busyId === detailTodo.id}
-              error={actions.errorById[detailTodo.id]}
-              onComplete={() => actions.complete(detailTodo.id)}
-              onCopyLink={() => actions.copyLink(detailTodo.id)}
-              onComment={(body) => actions.comment(detailTodo.id, body)}
-              onStartEdit={() => editor.editTodo(detailTodo)}
+          master.creating ? (
+            <TodoCreateForm
+              onCreate={create}
               scratchpads={scratchpads}
-              edit={editStateFor(detailTodo)}
+              onCancel={master.back}
+              error={editor.error}
             />
+          ) : (
+            detailTodo && (
+              <TodoDetail
+                todo={detailTodo}
+                onBack={master.back}
+                titleOf={titleOf}
+                lockOwnerLabel={
+                  detailTodo.locked_by != null ? labelOf(detailTodo.locked_by) : undefined
+                }
+                onOpenAgent={onOpenAgent}
+                busy={actions.busyId === detailTodo.id}
+                error={actions.errorById[detailTodo.id]}
+                onComplete={() => actions.complete(detailTodo.id)}
+                onCopyLink={() => actions.copyLink(detailTodo.id)}
+                onComment={(body) => actions.comment(detailTodo.id, body)}
+                onStartEdit={() => editor.editTodo(detailTodo)}
+                scratchpads={scratchpads}
+                edit={editStateFor(detailTodo)}
+              />
+            )
           )
         }
         onSettled={master.onSettled}

@@ -7,6 +7,8 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/in
 export const BOARD_TOOLBAR_ATTRIBUTE = "data-board-toolbar";
 /** The DOM handle the "{shown} of {total}" tally carries. */
 export const BOARD_COUNT_ATTRIBUTE = "data-board-count";
+/** The primary control that opens a board's create pane. */
+export const BOARD_CREATE_ATTRIBUTE = "data-board-create";
 
 export interface BoardToolbarProps {
   /** Plural noun the toolbar names its subject by: "todos" → placeholder "Search todos…", aria-label "Search todos". */

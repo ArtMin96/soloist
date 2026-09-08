@@ -9,6 +9,38 @@
 
 ## Current state
 
+> **NEWEST (2026-09-08): TODO/SCRATCHPAD CARD METADATA + CREATE-PANE UX — `Done — pending
+> verify`, uncommitted on `feat/todo-workspace-ux` (PR #200).** Todo cards and detail headers now
+> show a stable `Todo #N` identity token. Blocked relationships use the existing semantic warning
+> surface, border and icon roles and name their targets (`Blocked by #2`, compacting additional
+> targets as `+N` on cards while listing every `Todo #N` in detail). Scratchpad cards and detail
+> headers share an aligned `Rev N` token plus an icon-led handle/updated rail, replacing the
+> undifferentiated metadata sentence without turning the compact card into a field list. Cards keep
+> revision opposite the title; detail puts it in the lower rail so a wrapping title retains the full
+> header width. Card metadata remains phrasing-only inside the row button.
+>
+> Both **New todo** and **New scratchpad** now open in the existing sliding detail panel through one
+> shared create route and `CreatePane`. Back/Cancel returns to the unchanged list and restores focus
+> to the originating New control; a refused create retains its draft, and a successful create
+> returns to the list. No backend or domain behavior changed. This is Phase 11 / O5–O6 UI polish;
+> overall Phase 11 remains **In progress**.
+>
+> **Evidence.** The implementation sweep passed **11 Vitest files / 135 tests**; after review fixes,
+> the final directly affected run passed **5 files / 62 tests**. The blocker relationship test was
+> mutation-proven red against the old count-only wording, then restored. The create outcome test was
+> mutation-proven red when a refused save incorrectly returned to the list, then restored.
+> `tsc --noEmit`, `scripts/check-theme-colors.mjs`, and `git diff --check` passed. The Impeccable
+> detector returned `[]`. The final surfaces use registered semantic accent, toolbar, warning,
+> foreground, muted and border roles only; there are no fixed palette colors or `dark:` branches.
+>
+> **Open thread.** A live WebKitGTK pass is still required at narrow/wide widths in light, dark and
+> a custom theme, so this checkpoint is not `Verified`.
+>
+> **Next session should start with:** run `just dev-alongside`; inspect todo and scratchpad cards,
+> blocker targets, detail headers, and both create-pane round trips at narrow/wide widths in light,
+> dark and one custom theme. Confirm focus returns to New on Back/Cancel before accepting the visual
+> checkpoint.
+
 > **NEWEST (2026-09-07): SHARED TODO/SCRATCHPAD DETAIL + CARD POLISH — `Done — pending verify`,
 > uncommitted on `feat/todo-workspace-ux` (PR #200).** The shared components now give both detail
 > surfaces the same compact, native-feeling treatment: the Back control aligns with the overview
