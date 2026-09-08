@@ -85,6 +85,8 @@ type BoardRoute = "list" | "detail";
 
 /** One scratchpad as its card summarises it. */
 interface BoardRow {
+  /** The durable id the core gave it, or `NaN` when the card rendered no readable one. */
+  id: number;
   name: string;
   /** The revision its chip reads, or `NaN` when the card rendered no chip at all. */
   revision: number;
@@ -151,18 +153,21 @@ export const scratchpadBoard = {
    * re-render and dies on a stale element reference.
    */
   async rows(): Promise<BoardRow[]> {
-    const raw: { name: string; revision: string | null }[] = await browser.execute(
-      (rowAttr: string, nameAttr: string, revisionAttr: string) =>
-        [...document.querySelectorAll(`[${rowAttr}]`)].map((row) => ({
-          name: row.getAttribute(nameAttr) ?? "",
-          revision:
-            row.querySelector(`[${revisionAttr}]`)?.textContent?.trim() ?? null,
-        })),
-      ROW_ATTR,
-      NAME_ATTR,
-      REVISION_ATTR,
-    );
-    return raw.map(({ name, revision }) => ({
+    const raw: { id: string | null; name: string; revision: string | null }[] =
+      await browser.execute(
+        (rowAttr: string, nameAttr: string, revisionAttr: string) =>
+          [...document.querySelectorAll(`[${rowAttr}]`)].map((row) => ({
+            id: row.getAttribute(rowAttr),
+            name: row.getAttribute(nameAttr) ?? "",
+            revision:
+              row.querySelector(`[${revisionAttr}]`)?.textContent?.trim() ?? null,
+          })),
+        ROW_ATTR,
+        NAME_ATTR,
+        REVISION_ATTR,
+      );
+    return raw.map(({ id, name, revision }) => ({
+      id: id === null ? Number.NaN : Number(id),
       name,
       revision: parseChipRevision(revision),
     }));
@@ -189,6 +194,24 @@ export const scratchpadBoard = {
       );
     }
     return revision;
+  },
+
+  /**
+   * Waits until the card named `name` is rendered, then returns the durable id the core gave it —
+   * the handle every route to the document carries. Read from the board rather than from the
+   * sidebar row under test, so a walk over that row is never checking one rendering of the id
+   * against itself.
+   */
+  async waitForRowId(name: string): Promise<number> {
+    await this.waitForRow(name);
+    const id = (await this.rows()).find((candidate) => candidate.name === name)?.id ?? Number.NaN;
+    if (Number.isNaN(id)) {
+      throw new Error(
+        `scratchpad row "${name}" carries no readable ${ROW_ATTR} — the card's row handle moved, ` +
+          `so its id is unknown rather than absent`,
+      );
+    }
+    return id;
   },
 
   /**

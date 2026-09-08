@@ -199,7 +199,9 @@ describe("OrchestrationPane", () => {
     showTodos();
 
     expect(await screen.findByText("Ship the release")).toBeTruthy();
-    expect(screen.queryByRole("status")).toBeNull();
+    // The board's own toolbar carries a polite count region for as long as it is mounted, so the
+    // wait is what `aria-busy` marks — that, and only that, must be gone.
+    expect(screen.queryByRole("status", { busy: true })).toBeNull();
   });
 
   it("offers a retry that re-reads when the first snapshot cannot be read", async () => {
@@ -234,7 +236,7 @@ describe("OrchestrationPane", () => {
     settle(snapshot());
 
     expect(await screen.findByText("No scratchpads yet")).toBeTruthy();
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("status", { busy: true })).toBeNull();
   });
 
   it("renders the scratchpad board once the snapshot lands", async () => {
@@ -249,8 +251,8 @@ describe("OrchestrationPane", () => {
     expect(document.querySelectorAll(`[${CARD_ROW_ATTRIBUTE}]`)).toHaveLength(1);
   });
 
-  // The pane mounts *with* the activation already on its props. Opening a session-work item from a
-  // terminal header deselects the process and names the target in one commit, so the pane the
+  // The pane mounts *with* the activation already on its props. Opening a document from the
+  // sidebar deselects the process and names the target in one commit, so the pane the
   // navigation lands in is always a fresh one — a switch that only reacts to `focus` changing after
   // mount leaves the reader on the agents tree instead of the item they asked for.
   it("opens on the view a navigation named, when that navigation is what mounted it", async () => {

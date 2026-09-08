@@ -47,11 +47,11 @@ import type {
   ProjectSettings,
   ProjectSettingsPage,
   ProjectView,
+  ProjectWork,
   PullRequestReview,
   PullRequestSurface,
   RenderedPrompt,
   ScratchpadView,
-  SessionWork,
   Sidebar,
   TemplateDefaults,
   TemplateKind,
@@ -98,10 +98,11 @@ export function agentActivity(): Promise<AgentSignal[]> {
   return invoke<AgentSignal[]>("agent_activity");
 }
 
-// The coordination documents an agent holds now or touched this run — the terminal header's
-// context. Null when the process is not in the registry.
-export function sessionWork(process: number): Promise<SessionWork | null> {
-  return invoke<SessionWork | null>("session_work", { process });
+// The coordination documents a project's live processes hold or touched this run, grouped by
+// document — the sidebar's Todos and Scratchpads groups. Empty lists for a project nothing has
+// touched.
+export function projectWork(project: number): Promise<ProjectWork> {
+  return invoke<ProjectWork>("project_work", { project });
 }
 
 // A project's working-tree status — what is checked out, how it stands against its upstream, and

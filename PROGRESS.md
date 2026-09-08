@@ -9,6 +9,95 @@
 
 ## Current state
 
+> **NEWEST (2026-09-08): PROJECT WORK IN THE SIDEBAR — `Done — pending verify`, committed on
+> `feat/sidebar-project-work` (PR #207, stacked on `feat/todo-workspace-ux`, PR #200).** A project's live coordination documents moved out of the
+> agent terminal header and into the sidebar. Core gained a project-level read model,
+> `Facade::project_work(project)` (`crates/core/src/facade/project_work.rs`), which joins the live
+> process registry, the durable todo/scratchpad lists and the in-memory `SessionActivity` on read —
+> the same derive-on-read shape `orchestration_snapshot` uses, no cached map anywhere. Each document
+> carries its live participants and one `DocumentRole` (`Implementing` for a held lock > `Editing`
+> for a recorded write > `Reading` for a recorded read). A `Done` todo is excluded in core, however
+> many processes hold or touched it; a scratchpad stays until the process that touched it leaves the
+> registry. `SessionActivity::forget` now publishes `SessionWorkChanged`, so a closing process's rows
+> leave the window with no other event having to fire. The per-process `Facade::session_work` query
+> and its `SessionWork`/`SessionTodo`/`SessionScratchpad` types are deleted, not kept — nothing calls
+> them once the header is gone. The Tauri command `session_work(process)` is now
+> `project_work(project)`; no MCP/HTTP/CLI surface was touched.
+>
+> **UI.** `SessionWorkBar` and `useSessionWork` are deleted. Each project node in the sidebar now
+> carries **Todos** and **Scratchpads** groups (`DocumentGroup`, `DocumentRow`, `documentItems.ts`,
+> `SidebarGroup.tsx`, `lib/documentRole.ts`, `store/useProjectWork.ts`, `store/projects/work.ts`),
+> each row a plain `<button>` inside a `role="list"` — never a `treeitem`, so `useSidebarHotkeys` and
+> `sidebarNav.ts` are untouched and the arrow-key walk still addresses process rows only. A row
+> carries the role badge, a participant count when a document has more than one, and a tooltip naming
+> every participant; clicking it opens that document's detail panel in the orchestration pane, the
+> navigation the header used to offer. Collapse state persists per project, independently of the
+> process groups. That open/focus route addresses a scratchpad by its numeric id, exactly as it
+> addresses a todo — a row's `data-document-scratchpad`, `onOpenScratchpad`, the `OrchestrationFocus`
+> union and `ScratchpadBoard`'s `focusId` all carry the id, while the name remains the handle the
+> scratchpad IPC (`scratchpadRead`/`Write`/`Archive`/`Rename`) and the MCP scratchpad tools address
+> a document by; `solo://` links were already keyed by the durable id and resolve to content, never
+> into this focus route. This is Phase 11 coordination/UI work; overall Phase 11 remains **In
+> progress**.
+>
+> **Decisions/Changes this session.** (a) "Live participant" is presence in the process registry with
+> no `ProcessKind` and no `ProcStatus` filter — only a bound session can record an access or take a
+> lock, so having touched the document is the real gate, and a stopped-but-registered lock holder is
+> information the reader wants. (b) The sidebar filter box does not narrow document rows; while a
+> query is active both groups are hidden, because the input is labelled "Filter processes…" and
+> `filterSidebar` stays a pure function over the two process/project arrays. (c) **Owner's call:** a
+> document group renders only when it has at least one row, whatever `hide_empty_sections` says —
+> that setting keeps governing the three process-kind groups and nothing else, since a project's kind
+> groups are fixed structure while these two are a live readout of what agents are doing now. No
+> Solo-behaviour divergence was introduced, so `KNOWN-DIVERGENCES.md` is unchanged. A naming cleanup
+> landed with the work: the read model's module is `facade/project_work.rs`, while the per-process
+> source keeps its name (`SessionActivity`, `MAX_SESSION_DOCUMENTS_PER_PROCESS`, and the
+> `SessionWorkChanged { process }` event, whose shape is unchanged). (d) **Made in review, not by
+> the owner:** a row shows the role as its glyph only (hammer / pencil / eye, tinted by role), with
+> the role word in the button's accessible name and the participant tooltip — the sidebar is a fixed
+> 16rem, and a visible role word left a title roughly a dozen characters. Restoring the visible word
+> is one `<span>` in `DocumentRow.tsx` plus its test.
+>
+> **Evidence (commands actually run, 2026-09-08).** `just lint` green — `cargo fmt --check`,
+> `clippy --workspace --all-targets -D warnings`, `tsc --noEmit`, ESLint, `prettier --check`,
+> `check-theme-colors.mjs`, `check-core-deps.sh` ("soloist-core is framework-free"),
+> `check-core-cycles.sh` ("183 module edges, no cycles"), schema test 2/2; the file-size script's
+> advisory list holds 26 files, `e2e/src/screens/Sidebar.ts` among them at 780 lines after this
+> change added 151. `cargo test -p soloist-core` → **1302 passed, 0 failed**, plus 7 doc-tests.
+> `cargo test -p soloist-app` → **102 passed, 0 failed**.
+> `vitest run` (Node 22, `crates/app/ui`) → **212 files, 1601 tests, all passing**.
+> `tsc --noEmit` in `e2e/` → clean. `just dupes` itself fails on this tree — the recipe's
+> `git ls-files --cached` still lists the deleted `SessionWorkBar.test.tsx` from the index, so the
+> script hits ENOENT (a latent bug in `scripts/report-duplication.mjs` with uncommitted deletions,
+> not caused here) — a copy filtered to existing files reports **no pair involving any file this
+> change added**. Test files: 6 are new — 5 `DocumentGroup`, 7 `DocumentRow`, 7 `documentItems`, 3
+> `documentRole`, 3 `store/projects/work`, 6 `useProjectWork`; the two Rust files now hold 10
+> (`facade/project_work_tests.rs`, the unbound/external-caller cases among them) and 10 (`session_activity_tests.rs`, `forget` publishing among
+> them), with `ProjectGroup` at 18 and `Sidebar` at 27. The e2e walk
+> `specs/coordination/todo-workspace.spec.ts` (10 `it` blocks) was reconciled onto the sidebar
+> handles **statically only** — it has not been run.
+>
+> **Also fixed, pre-existing red, not from this feature.** Two `OrchestrationPane.test.tsx`
+> assertions queried `role="status"` broadly, which matched `BoardToolbar`'s permanent polite count
+> `<output>` once a board mounted. Narrowed to `queryByRole("status", { busy: true })`, so the
+> assertion means what its name says — the loading stand-in is gone. Mutation-proven: moving the
+> assertion ahead of the settle reddened exactly that test, then restored byte-identical (`cmp`).
+>
+> **Open threads.** (1) The e2e walk needs a live WebKitGTK run: the roles actually rendered, whether
+> the two `Done` drops re-read inside the wait budget on `TodoChanged`, whether `openDocument` needs
+> the `select()`-style click retry, that the groups arrive expanded, and that the stop step really
+> empties both. (2) No e2e mutation pass has been run against the new core paths. (3) No visual pass
+> yet at narrow and wide widths in light, dark and a custom theme. (4) A lock holder that recorded no
+> tool access would strand its sidebar row on close, because `SessionActivity::forget` announces only
+> when a record existed and the todo auto-release does not publish `TodoChanged`; unreachable today
+> (the only lock path always records) and left for a follow-up that routes the auto-release through
+> the `Todos` aggregate.
+>
+> **Next session should start with:** build the app, then from `e2e/` run
+> `pnpm test --spec specs/coordination/todo-workspace.spec.ts` (note `--spec`, no `--`) and take the
+> walk from `Done — pending verify` to `Verified`; then `just dev-alongside` for the visual pass on
+> the two sidebar groups at narrow/wide widths in light, dark and one custom theme.
+
 > **NEWEST (2026-09-08): TODO/SCRATCHPAD CARD METADATA + CREATE-PANE UX — `Done — pending
 > verify`, uncommitted on `feat/todo-workspace-ux` (PR #200).** Todo cards and detail headers now
 > show a stable `Todo #N` identity token. Blocked relationships use the existing semantic warning

@@ -240,9 +240,10 @@ paths are coordination-only. Each mutation reddened exactly one assertion; `git 
 none of the three files after restore.
 
 The todo-workspace walk (`specs/coordination/todo-workspace.spec.ts`) drives the board rows, the locked row's agent
-control, and the agent terminal header's session-work context against the same bound lead, whose coordination arm
-was extended to `todo_lock` / `todo_get` / `scratchpad_read` so "Current work" and "This session" are what the core
-recorded from real tool calls. Its first run caught the walk's own pretend assertion before it caught anything in
+control, and the project's live coordination documents against the same bound lead, whose coordination arm
+was extended to `todo_lock` / `todo_get` / `scratchpad_read` so the documents and roles shown are what the core
+recorded from real tool calls. The run recorded below read them from the agent terminal header, which the sidebar's
+Todos and Scratchpads groups replaced on 2026-09-08. Its first run caught the walk's own pretend assertion before it caught anything in
 the product: stopping the only process navigates the window to the start surface, so an "empty" read of the lead's
 header was a read of no pane at all and the clear-on-stop assertion passed vacuously — the mutation below stayed
 green until the read was made to report "no pane visible" as distinct from "nothing shown", and the walk re-opened

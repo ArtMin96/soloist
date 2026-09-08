@@ -12,8 +12,10 @@ import {
   groupByProject,
   kindCollapseKey,
   projectCollapseKey,
+  workCollapseKey,
 } from "@/store/projects";
 import { useCollapseState } from "@/store/useCollapseState";
+import { useProjectWork } from "@/store/useProjectWork";
 import { useSidebarSettings } from "@/store/sidebarSettingsContext";
 import { useToggleSet } from "@/store/useToggleSet";
 import type { ProcessActionHandlers } from "@/lib/processActions";
@@ -43,6 +45,8 @@ interface SidebarProps {
   onOpenOrchestration: (projectId: number) => void;
   onRemoveProject: (projectId: number) => void;
   onReorderProjects: (order: number[]) => void;
+  onOpenTodo: (project: number, todo: number) => void;
+  onOpenScratchpad: (project: number, scratchpad: number) => void;
 }
 
 // The process tree, grouped by project: each opened project is a collapsible node over its
@@ -67,6 +71,8 @@ export function Sidebar({
   onOpenOrchestration,
   onRemoveProject,
   onReorderProjects,
+  onOpenTodo,
+  onOpenScratchpad,
 }: SidebarProps) {
   const { sidebar } = useSidebarSettings();
   const [filter, setFilter] = useState("");
@@ -81,6 +87,9 @@ export function Sidebar({
     sidebar.hide_empty_sections,
     lineage,
   );
+  // One listener for the whole sidebar, over the unfiltered process/project lists, so narrowing the
+  // tree with the filter never changes what is read from the backend.
+  const work = useProjectWork(projects, processes);
   const [collapsed, setCollapsed] = useCollapseState();
   const collapsedLeads = useToggleSet();
   const handleNavKeyDown = useSidebarHotkeys({
@@ -146,6 +155,13 @@ export function Sidebar({
                   onOpenProjectSettings={() => onOpenProjectSettings(tree.project.id)}
                   onOpenOrchestration={() => onOpenOrchestration(tree.project.id)}
                   onRemoveProject={() => onRemoveProject(tree.project.id)}
+                  work={filtering ? undefined : work.get(tree.project.id)}
+                  workOpen={(section) => !collapsed[workCollapseKey(tree.project.id, section)]}
+                  onWorkOpenChange={(section, value) =>
+                    setCollapsed(workCollapseKey(tree.project.id, section), !value)
+                  }
+                  onOpenTodo={(todo) => onOpenTodo(tree.project.id, todo)}
+                  onOpenScratchpad={(scratchpad) => onOpenScratchpad(tree.project.id, scratchpad)}
                 />
               )}
             </SortableItem>

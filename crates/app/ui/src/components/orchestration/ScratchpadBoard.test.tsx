@@ -394,7 +394,7 @@ describe("ScratchpadBoard", () => {
     fireEvent.change(searchBox(), { target: { value: "release" } });
     expect(rowNames()).toEqual(["release-notes"]);
 
-    rerenderBoard(rerender, { focusName: "old-plan", focusNonce: 10 });
+    rerenderBoard(rerender, { focusId: retired.id, focusNonce: 10 });
 
     // The detail shows the scratchpad whatever the list is doing, so nothing has to be revealed to
     // reach it — and the list the reader returns to is still arranged the way they left it.
@@ -405,10 +405,10 @@ describe("ScratchpadBoard", () => {
 
   it("opens the target once it arrives, when the nonce was set before the scratchpads were", () => {
     // Mirrors a pane that mounts fresh and asks for a target before its first snapshot lands.
-    const { rerender } = board([], { focusName: "release-notes", focusNonce: 20 });
+    const { rerender } = board([], { focusId: notes.id, focusNonce: 20 });
     expect(route()).toBe("list");
 
-    rerenderBoard(rerender, { scratchpads: pads, focusName: "release-notes", focusNonce: 20 });
+    rerenderBoard(rerender, { scratchpads: pads, focusId: notes.id, focusNonce: 20 });
 
     expect(route()).toBe("detail");
     expect(document.activeElement).toBe(backButton());
@@ -418,11 +418,11 @@ describe("ScratchpadBoard", () => {
     // The pane leaves `focus` set after acting on it and unmounts the board whenever the user
     // switches view, so switching away and back re-delivers the same activation to a fresh board. A
     // nonce is one navigation, not a standing instruction to keep reopening the detail.
-    const first = board(pads, { focusName: "release-notes", focusNonce: 30 });
+    const first = board(pads, { focusId: notes.id, focusNonce: 30 });
     expect(route()).toBe("detail");
     first.unmount();
 
-    board(pads, { focusName: "release-notes", focusNonce: 30 });
+    board(pads, { focusId: notes.id, focusNonce: 30 });
 
     expect(route()).toBe("list");
   });
