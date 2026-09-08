@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { humanizeName } from "@/lib/humanize";
+import { distinctHandle, humanizeName } from "@/lib/humanize";
 
 describe("humanizeName", () => {
   it("reads a hyphenated slug as a sentence", () => {
@@ -27,5 +27,16 @@ describe("humanizeName", () => {
     expect(humanizeName("-leading")).toBe("-leading");
     expect(humanizeName("trailing-")).toBe("trailing-");
     expect(humanizeName("double--dash")).toBe("double--dash");
+  });
+});
+
+describe("distinctHandle", () => {
+  it("gives the raw handle of a slug, which reads differently from its title", () => {
+    expect(distinctHandle("rich-editor-design")).toBe("rich-editor-design");
+  });
+
+  it("gives nothing for a name that is already its own title", () => {
+    expect(distinctHandle("research")).toBeNull();
+    expect(distinctHandle("Release plan")).toBeNull();
   });
 });

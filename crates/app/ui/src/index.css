@@ -94,6 +94,13 @@
   /* The highlight that travels across a working agent's name. Linear and looping: this reports
    * an ongoing activity rather than answering an interaction, so it does not spring or settle. */
   --animate-text-shimmer: text-shimmer var(--dur-shimmer) linear infinite;
+
+  /* The reveal a loading stand-in fades in with. `backwards` holds it invisible through the
+   * delay, so a read that lands inside that window swaps in content without a stand-in ever
+   * being seen. Incidental, so it takes the no-spring curve. */
+  --animate-skeleton-reveal: skeleton-reveal var(--dur-fast) var(--ease-out-quint)
+    var(--skeleton-delay) backwards;
+
   --color-status-running: var(--status-running);
   --color-status-transition: var(--status-transition);
   --color-status-stopped: var(--status-stopped);
@@ -214,6 +221,10 @@
   --dur-sheet-out: 180ms; /* dialog / sheet dismiss */
   --dur-ring: 150ms; /* focus ring grow-in */
   --dur-shimmer: 2200ms; /* working-label highlight sweep */
+
+  /* The wait before a loading stand-in is revealed, so a fast read never flashes one. A delay is
+   * not motion, so reduced motion keeps it while collapsing the fade. */
+  --skeleton-delay: 150ms;
 
   /*
    * Body tracking. The native desktop type scale tightens 13px text very slightly (−0.08pt at
@@ -427,6 +438,12 @@
   }
   to {
     height: 0;
+  }
+}
+
+@keyframes skeleton-reveal {
+  from {
+    opacity: 0;
   }
 }
 

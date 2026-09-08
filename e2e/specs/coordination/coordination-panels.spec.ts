@@ -8,7 +8,7 @@ import {
 import { launchAgent } from "../../src/flows/launch.js";
 import { openProject } from "../../src/flows/openProject.js";
 import { orchestrationPane } from "../../src/screens/OrchestrationPane.js";
-import { scratchpadPanel } from "../../src/screens/ScratchpadPanel.js";
+import { scratchpadBoard } from "../../src/screens/ScratchpadBoard.js";
 import { sidebar } from "../../src/screens/Sidebar.js";
 import { todoBoard } from "../../src/screens/TodoBoard.js";
 
@@ -46,16 +46,20 @@ describe("the coordination panels", () => {
 
   it("refuses a stale scratchpad save and keeps the concurrent edit", async () => {
     await orchestrationPane.showView("scratchpads");
-    await scratchpadPanel.waitForRoster();
+    await scratchpadBoard.waitForBoard();
 
-    // Open the scratchpad the lead created; the editor now holds the revision it opened at.
-    const opened = await scratchpadPanel.waitForRow(COORDINATION.scratchpad);
-    await scratchpadPanel.open(COORDINATION.scratchpad);
+    // Open the scratchpad the lead created. The detail panel lands in reading, so the editor — and
+    // with it the revision the next save is guarded by — starts before the concurrent write, not
+    // after: a document merely being *read* follows the revision the board sees, and the pane
+    // re-reads it under the reader. Only an open editor holds the revision it opened at.
+    const opened = await scratchpadBoard.waitForRow(COORDINATION.scratchpad);
+    await scratchpadBoard.open(COORDINATION.scratchpad);
+    await scratchpadBoard.startEdit();
 
     // The lead re-writes the same scratchpad over the wire, bumping its revision under our stale
-    // editor. Wait for that concurrent write to land — the roster moves off the opened revision.
+    // editor. Wait for that concurrent write to land — the card moves off the opened revision.
     await triggerScratchpadRewrite();
-    const bumped = await scratchpadPanel.waitForRevisionChange(
+    const bumped = await scratchpadBoard.waitForRevisionChange(
       COORDINATION.scratchpad,
       opened,
     );
@@ -64,13 +68,13 @@ describe("the coordination panels", () => {
     // Our edit, saved against the now-stale revision, is refused by the core — and the conflict
     // banner names the revision the scratchpad actually moved to, which only the concurrent writer
     // produced. A guard that had been dropped would let this save through with no conflict at all.
-    await scratchpadPanel.edit();
-    await scratchpadPanel.save();
-    expect(await scratchpadPanel.waitForConflictRevision()).toBe(bumped);
+    await scratchpadBoard.edit();
+    await scratchpadBoard.save();
+    expect(await scratchpadBoard.waitForConflictRevision()).toBe(bumped);
 
     // Nothing was clobbered: reloading shows the concurrent writer's content, not our rejected edit.
-    await scratchpadPanel.reload();
-    await scratchpadPanel.waitForBody(COORDINATION.bodyV2);
+    await scratchpadBoard.reload();
+    await scratchpadBoard.waitForBody(COORDINATION.bodyV2);
   });
 
   it("refuses to complete a blocked todo until its blocker is done", async () => {
@@ -101,8 +105,9 @@ describe("the coordination panels", () => {
 
     // The comment renders its body and its author — the lead's own label, which the core stamped
     // from the creating bound session, not anything the window or the caller supplied. An unbound
-    // author would read "unattributed"; only a real bound session earns the label.
-    const text = await todoBoard.expandedText(COORDINATION.commented);
+    // author would read "unattributed"; only a real bound session earns the label. The thread lives
+    // in the todo's detail panel, which the board hands the pane to when the card is opened.
+    const text = await todoBoard.detailText(COORDINATION.commented);
     expect(text).toContain(COORDINATION.comment);
     expect(text).toContain(LEAD);
   });

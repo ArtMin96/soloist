@@ -80,6 +80,11 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
     writeInterfaceScaleHint(next.interface_font_scale);
   }, []);
 
+  // `current` never runs during render: the queue only calls it from `update`/`task`, which this file
+  // calls solely from event-driven callbacks, never from render. No effect-deferred alternative works
+  // here — the queue is stateful (pending mutations live in its closure) and the hooks below need it
+  // synchronously on the first render, so it must exist before any effect could construct it.
+  // eslint-disable-next-line react-hooks/refs -- see above
   const [mutationQueue] = useState(() =>
     createAppearanceMutationQueue({
       write: writeAppearance,

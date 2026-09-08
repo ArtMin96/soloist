@@ -13,9 +13,10 @@ use serde::Serialize;
 
 use crate::agents::AgentActivity;
 use crate::coordination::{
-    AgentMessageRecord, DiagramSummary, KvEntry, LeaseView, ScratchpadSummary, TimerView, TodoView,
+    AccessKind, AgentMessageRecord, DiagramSummary, KvEntry, LeaseView, ScratchpadSummary,
+    TimerView, TodoStatus, TodoView,
 };
-use crate::ids::{ProcessId, ProjectId};
+use crate::ids::{ProcessId, ProjectId, ScratchpadId, TodoId};
 use crate::process::{ProcStatus, ProcessKind};
 
 /// One node in the agent lineage tree: a managed process the orchestration UI shows, with its
@@ -82,4 +83,40 @@ pub struct OrchestrationSnapshot {
     /// Recorded agent-to-agent exchanges in the project, oldest first. Read live from the mailbox
     /// that owns them — bounded, so the oldest exchanges of a long run are no longer here.
     pub messages: Vec<AgentMessageRecord>,
+}
+
+/// One todo in a [`SessionWork`] read: enough for the agent terminal header to name it and say
+/// what the process did with it, without the full board's document.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct SessionTodo {
+    pub id: TodoId,
+    pub title: String,
+    pub status: TodoStatus,
+    pub blocked: bool,
+    /// True while this process holds the todo's lock — "current work".
+    pub locked: bool,
+    /// How this process last touched it this run; `None` when it holds the lock without having
+    /// read or written it through a tool this run.
+    pub access: Option<AccessKind>,
+}
+
+/// One scratchpad in a [`SessionWork`] read.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct SessionScratchpad {
+    pub id: ScratchpadId,
+    pub name: String,
+    pub access: AccessKind,
+}
+
+/// The coordination documents one process holds now or touched this run — the agent terminal
+/// header's "current work" / "this session" context. `todos` orders the process's locked todos
+/// first (by id), then its remaining recorded todos in the order it first touched them; a recorded
+/// id with no live document is dropped, so a deleted todo or scratchpad never strands a stale
+/// title in the header.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct SessionWork {
+    pub process: ProcessId,
+    pub project: ProjectId,
+    pub todos: Vec<SessionTodo>,
+    pub scratchpads: Vec<SessionScratchpad>,
 }

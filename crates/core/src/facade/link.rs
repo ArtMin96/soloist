@@ -8,7 +8,7 @@
 
 use super::scoped::ScopedFacade;
 use super::Facade;
-use crate::coordination::{Link, LinkContent, LinkTarget};
+use crate::coordination::{AccessKind, Link, LinkContent, LinkTarget};
 use crate::facade::CoordinationError;
 use crate::ids::{ProjectId, ScratchpadId, TodoId};
 
@@ -52,6 +52,7 @@ impl ScopedFacade<'_> {
                     .scratchpads
                     .read(project, &name)?
                     .ok_or(CoordinationError::UnknownScratchpad)?;
+                self.note_scratchpad(view.id, AccessKind::Loaded);
                 Ok(LinkContent::Scratchpad(view))
             }
             LinkTarget::Todo(id) => {
@@ -60,6 +61,7 @@ impl ScopedFacade<'_> {
                     .todos
                     .get(project, id)?
                     .ok_or(CoordinationError::UnknownTodo)?;
+                self.note_todo(view.id, AccessKind::Loaded);
                 Ok(LinkContent::Todo(view))
             }
         }

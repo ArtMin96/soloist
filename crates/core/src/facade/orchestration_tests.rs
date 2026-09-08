@@ -205,7 +205,7 @@ fn the_snapshot_is_scoped_to_its_project() {
 #[test]
 fn creating_a_todo_emits_one_todo_changed() {
     let facade = facade();
-    let (session, _owner) = bound_session(&facade, PROJECT);
+    let (session, owner) = bound_session(&facade, PROJECT);
     let mut rx = facade.subscribe();
 
     let todo = facade
@@ -214,11 +214,20 @@ fn creating_a_todo_emits_one_todo_changed() {
         .expect("create")
         .view;
 
+    // The bound process's first touch of the todo is the one other event a create may raise.
     let events = drain(&mut rx);
-    assert_eq!(events.len(), 1, "exactly one event: {events:?}");
+    assert_eq!(
+        events.len(),
+        2,
+        "one todo event and one activity event: {events:?}"
+    );
     assert!(matches!(
         &events[0],
         DomainEvent::TodoChanged { project, id } if *project == PROJECT && *id == todo.id
+    ));
+    assert!(matches!(
+        &events[1],
+        DomainEvent::SessionWorkChanged { process } if *process == owner
     ));
 }
 
@@ -321,7 +330,7 @@ fn cancelling_a_timer_emits_one_timer_cleared() {
 #[test]
 fn writing_a_scratchpad_emits_one_scratchpad_changed() {
     let facade = facade();
-    let (session, _owner) = bound_session(&facade, PROJECT);
+    let (session, owner) = bound_session(&facade, PROJECT);
     let mut rx = facade.subscribe();
 
     facade
@@ -329,11 +338,20 @@ fn writing_a_scratchpad_emits_one_scratchpad_changed() {
         .scratchpad_write("plan", scratchpad_body(), None)
         .expect("write");
 
+    // The bound process's first touch of the scratchpad is the one other event a write may raise.
     let events = drain(&mut rx);
-    assert_eq!(events.len(), 1, "exactly one event: {events:?}");
+    assert_eq!(
+        events.len(),
+        2,
+        "one scratchpad event and one activity event: {events:?}"
+    );
     assert!(matches!(
         &events[0],
         DomainEvent::ScratchpadChanged { project, name } if *project == PROJECT && name == "plan"
+    ));
+    assert!(matches!(
+        &events[1],
+        DomainEvent::SessionWorkChanged { process } if *process == owner
     ));
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { normalizeHexColor } from "@/theme/derive";
 
@@ -15,9 +15,15 @@ export function ThemeColorInput({
 }) {
   const id = useId();
   const [draft, setDraft] = useState(value);
+  // A commit that fails to validate leaves `draft` untouched, so `value` only ever moves out from
+  // under it on a genuine external change -- tracked here, during render, rather than in an effect,
+  // so that reset lands the same render `value` does.
+  const [syncedValue, setSyncedValue] = useState(value);
+  if (syncedValue !== value) {
+    setSyncedValue(value);
+    setDraft(value);
+  }
   const valid = normalizeHexColor(draft) !== null;
-
-  useEffect(() => setDraft(value), [value]);
 
   const commit = () => {
     const normalized = normalizeHexColor(draft);

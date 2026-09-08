@@ -1,7 +1,8 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vitest/config";
-import react from "@vitejs/plugin-react";
+import react, { reactCompilerPreset } from "@vitejs/plugin-react";
+import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import { visualizer } from "rollup-plugin-visualizer";
 
@@ -41,7 +42,15 @@ const e2ePlugin: Plugin[] = process.env.VITE_E2E
   : [];
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), ...e2ePlugin, ...bundleReport],
+  plugins: [
+    react(),
+    // reactCompilerPreset() ships its own rolldown.filter, so this only runs babel over
+    // files whose content looks like a component or hook — not every module in the graph.
+    babel({ presets: [reactCompilerPreset()] }),
+    tailwindcss(),
+    ...e2ePlugin,
+    ...bundleReport,
+  ],
   resolve: {
     alias: {
       "@": path.resolve(dir, "./src"),

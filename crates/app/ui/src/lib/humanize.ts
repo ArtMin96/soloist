@@ -19,3 +19,12 @@ export function humanizeName(name: string): string {
   const words = name.replace(/[-_]/g, " ");
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
+
+/**
+ * The raw handle to show beside a document's title, or null when there is nothing to add: the
+ * handle earns its place only when the title no longer reads as it, because a name the user wrote
+ * is its own handle and printing it twice would be noise.
+ */
+export function distinctHandle(name: string): string | null {
+  return humanizeName(name) === name ? null : name;
+}

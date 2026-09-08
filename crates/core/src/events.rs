@@ -210,6 +210,12 @@ pub enum DomainEvent {
     DiagramChanged { project: ProjectId, name: String },
     /// A coordination key-value entry `key` in `project` changed (set or deleted).
     KvChanged { project: ProjectId, key: String },
+    /// `process` read or wrote a todo or scratchpad through a bound session this run, for the
+    /// first time or with a new [`AccessKind`](crate::coordination::AccessKind). Ids only, like the
+    /// other change-notifications: a subscriber re-reads
+    /// [`Facade::session_work`](crate::facade::Facade::session_work) rather than trusting a
+    /// payload, so a chatty run coalesces to one re-query per frame.
+    SessionWorkChanged { process: ProcessId },
     /// An alert was raised for a user who is looking at Soloist but not at the process that
     /// raised it, so it belongs in an in-app toast rather than a desktop notification. The
     /// notification reactor has already applied the master switch, the notification level, and

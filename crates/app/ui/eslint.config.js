@@ -17,12 +17,11 @@ export default tseslint.config(
       globals: globals.browser,
     },
     plugins: {
-      "react-hooks": reactHooks,
+      ...reactHooks.configs.flat.recommended.plugins,
       "react-refresh": reactRefresh,
     },
     rules: {
-      "react-hooks/rules-of-hooks": "error",
-      "react-hooks/exhaustive-deps": "warn",
+      ...reactHooks.configs.flat.recommended.rules,
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
     },
   },

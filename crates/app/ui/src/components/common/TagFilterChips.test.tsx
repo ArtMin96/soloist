@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { TagFilterChips } from "@/components/orchestration/TagFilterChips";
+import { TagFilterChips } from "@/components/common/TagFilterChips";
 
 afterEach(cleanup);
 
@@ -48,12 +48,26 @@ describe("TagFilterChips", () => {
     expect(screen.getByRole("button", { name: "beta" }).getAttribute("aria-pressed")).toBe("true");
   });
 
+  it("keeps a selected tag available to clear when it leaves the available tags", () => {
+    const { rerender } = render(<Harness tags={["alpha", "beta"]} />);
+    fireEvent.click(screen.getByRole("button", { name: "alpha" }));
+
+    rerender(<Harness tags={[]} />);
+
+    const stale = screen.getByRole("button", { name: "alpha" });
+    expect(stale.getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(stale);
+    expect(screen.queryByRole("button", { name: "alpha" })).toBeNull();
+  });
+
   it("only applies the hover background to the inactive chip, never the pressed one", () => {
     render(<TagFilterChips tags={["alpha", "beta"]} active="beta" onToggle={vi.fn()} />);
     const inactive = screen.getByRole("button", { name: "alpha" });
     const active = screen.getByRole("button", { name: "beta" });
 
     expect(inactive.className).toMatch(/hover:bg-sidebar-accent/);
+    expect(inactive.className).toMatch(/hover:text-sidebar-accent-foreground/);
     expect(active.className).not.toMatch(/hover:bg-sidebar-accent/);
   });
 

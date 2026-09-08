@@ -79,9 +79,17 @@ export function useDiagramRender(source: string, onParse?: (ok: boolean) => void
     }
   }, [onParseRef]);
 
+  // A source or palette change shows as pending at once — adjusted directly during render (the
+  // documented pattern for resetting state when an input changes: react.dev/reference/react/useState
+  // #storing-information-from-previous-renders), rather than a tick later once an effect runs.
+  const [requestedFor, setRequestedFor] = useState<Request>({ source, signature });
+  if (requestedFor.source !== source || requestedFor.signature !== signature) {
+    setRequestedFor({ source, signature });
+    setRender((current) => ({ status: "pending", drawn: current.drawn }));
+  }
+
   useEffect(() => {
     next.current = { source, signature };
-    setRender((current) => ({ status: "pending", drawn: current.drawn }));
     if (drawing.current) return;
     drawing.current = true;
     void drain();

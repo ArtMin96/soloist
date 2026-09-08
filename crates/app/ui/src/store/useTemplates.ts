@@ -63,6 +63,23 @@ export function useTemplates(project: number | null): TemplatesStore {
   const [defaults, setDefaults] = useState<TemplateDefaults>(NO_DEFAULTS);
   const [error, setError] = useState<string | null>(null);
 
+  // A project closing empties its scope's lists and defaults at once — adjusted directly during
+  // render (react.dev/reference/react/useState#storing-information-from-previous-renders) so the
+  // panel never shows a moment of the just-closed project's data under "no project open". Opening a
+  // *different* project needs no reset here: the effect below always re-fetches that scope for real.
+  const [openFor, setOpenFor] = useState(project);
+  if (project !== openFor) {
+    setOpenFor(project);
+    if (project == null) {
+      setLists((prev) => {
+        const next = { ...prev };
+        for (const kind of TEMPLATE_KINDS) next[kind] = { ...prev[kind], project: [] };
+        return next;
+      });
+      setDefaults(NO_DEFAULTS);
+    }
+  }
+
   // The latest lists, read by `duplicate` for name uniqueness without making it re-created on every
   // refresh (which would not matter, but the ref keeps the action identity stable).
   const listsRef = useLatestRef(lists);
@@ -74,12 +91,11 @@ export function useTemplates(project: number | null): TemplatesStore {
     [project],
   );
 
+  // A project-scoped read has nothing to ask for with none open; the render-phase reset above
+  // already holds that scope empty, so this just skips the fetch.
   const loadKind = useCallback(
     (kind: TemplateKind, scope: TemplateScope) => {
-      if (scope === "project" && project == null) {
-        setLists((prev) => ({ ...prev, [kind]: { ...prev[kind], project: [] } }));
-        return;
-      }
+      if (scope === "project" && project == null) return;
       listTemplates(kind, idOf(scope))
         .then((rows) => setLists((prev) => ({ ...prev, [kind]: { ...prev[kind], [scope]: rows } })))
         .catch(fail);
@@ -87,13 +103,11 @@ export function useTemplates(project: number | null): TemplatesStore {
     [fail, idOf, project],
   );
 
-  // A default belongs to a project, so with none open there is nothing to read — and asking anyway
-  // would fail the call and report a load error over a panel that is simply projectless.
+  // A default belongs to a project, so with none open there is nothing to read — the render-phase
+  // reset above already holds it cleared, and asking anyway would fail the call and report a load
+  // error over a panel that is simply projectless.
   const loadDefaults = useCallback(() => {
-    if (project == null) {
-      setDefaults(NO_DEFAULTS);
-      return;
-    }
+    if (project == null) return;
     templateDefaults(project).then(setDefaults).catch(fail);
   }, [fail, project]);
 

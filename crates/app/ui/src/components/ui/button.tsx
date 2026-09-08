@@ -9,24 +9,24 @@ import {
 } from "@/components/ui/glass"
 
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center rounded-md border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-[transform,scale,color,background-color,border-color,box-shadow] duration-[var(--dur-select)] ease-spring outline-none select-none motion-reduce:transition-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 active:not-aria-[haspopup]:scale-[0.97] active:duration-[var(--dur-press)] motion-reduce:active:scale-100 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-error aria-invalid:ring-2 aria-invalid:ring-error/30 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 items-center justify-center rounded-md border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-[transform,scale,color,background-color,border-color,box-shadow] duration-[var(--dur-select)] ease-spring outline-none select-none motion-reduce:transition-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring active:not-aria-[haspopup]:scale-[0.97] active:duration-[var(--dur-press)] motion-reduce:active:scale-100 disabled:pointer-events-none disabled:border-border disabled:bg-muted disabled:text-muted-foreground disabled:[box-shadow:none] aria-invalid:border-error aria-invalid:ring-2 aria-invalid:ring-error [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
         default:
-          "bg-primary text-primary-foreground [box-shadow:var(--glass-primary-shadow)] hover:bg-primary/85",
+          "bg-primary text-primary-foreground [box-shadow:var(--glass-primary-shadow)] hover:border-primary-foreground hover:bg-primary",
         outline: cn(
           GLASS_INTERACTIVE_CONTROL_SURFACE,
-          "text-toolbar-control-foreground hover:text-foreground aria-expanded:text-foreground"
+          "text-toolbar-control-foreground hover:text-toolbar-control-foreground aria-expanded:text-toolbar-control-foreground"
         ),
         secondary:
           "bg-secondary text-secondary-foreground [box-shadow:var(--glass-control-shadow)] hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground supports-backdrop-filter:bg-[color-mix(in_srgb,var(--secondary)_calc(var(--glass-opacity)*100%),transparent)] supports-backdrop-filter:backdrop-blur-md supports-backdrop-filter:backdrop-saturate-150",
         ghost: cn(
           GLASS_GHOST_INTERACTION,
-          "hover:text-foreground aria-expanded:text-foreground"
+          "hover:text-toolbar-control-foreground aria-expanded:text-toolbar-control-foreground"
         ),
         destructive:
-          "bg-error-surface text-error-foreground hover:bg-error-surface/80 focus-visible:border-error focus-visible:ring-error/30",
+          "bg-error-surface text-error-foreground hover:border-error hover:bg-error-surface focus-visible:border-error focus-visible:ring-error",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {

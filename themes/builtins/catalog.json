@@ -71,7 +71,7 @@
         "statusStopped": "#6e7276",
         "statusCrashed": "#cc2827",
         "statusExhausted": "#ac0024",
-        "statusAttention": "#e19100",
+        "statusAttention": "#b47400",
         "gitModified": "#915200",
         "gitAdded": "#007026",
         "gitDeleted": "#c0180a",

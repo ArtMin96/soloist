@@ -71,8 +71,8 @@ pub use config::{
 };
 pub use configchange::{ConfigSync, Rename, TrustReviewCommand};
 pub use coordination::{
-    is_link, placeholders, AcquireOutcome, AgentBroadcastReceipt, AgentMailbox, AgentMessage,
-    AgentMessageDelivery, AgentMessageKind, AgentMessageOutcome, AgentMessageReceipt,
+    is_link, placeholders, AccessKind, AcquireOutcome, AgentBroadcastReceipt, AgentMailbox,
+    AgentMessage, AgentMessageDelivery, AgentMessageKind, AgentMessageOutcome, AgentMessageReceipt,
     AgentMessageRecord, AgentRelationship, AgentRosterEntry, BlockerGate, Comment, CommentAuthor,
     CommentEdit, CommentOutcome, DiagramRef, DiagramRenameError, DiagramRenameResult, DiagramRepo,
     DiagramSummary, DiagramView, DiagramWriteError, DiagramWriteResult, Diagrams, ExportedTemplate,
@@ -81,16 +81,17 @@ pub use coordination::{
     NoopLockRepo, NoopScratchpadRepo, NoopTemplateRepo, NoopTimerRepo, NoopTodoRepo, RenameError,
     RenameResult, RenderError, RenderRequest, RenderedPrompt, ScratchpadLink, ScratchpadRef,
     ScratchpadRepo, ScratchpadSummary, ScratchpadTransfer, ScratchpadView, Scratchpads,
-    SeedTemplate, SetWhenIdleOutcome, StoredDiagram, StoredLease, StoredScratchpad, StoredTemplate,
-    StoredTimer, StoredTodo, TemplateRepo, TemplateSummary, TemplateView, TemplateWriteResult,
-    Templates, TimerRepo, TimerScheduler, TimerStatus, TimerView, Timers, TodoCompletion,
-    TodoCompletionAtomicResult, TodoCompletionCompareResult, TodoCompletionContext,
-    TodoCompletionDecision, TodoCompletionIntent, TodoCompletionKey, TodoCompletionNotice,
-    TodoCompletionNoticeOutcome, TodoCompletionOccurrence, TodoCompletionOutcome, TodoDoc,
-    TodoError, TodoLockReleaser, TodoRepo, TodoStatus, TodoSummary, TodoView, TodoWriteResult,
-    Todos, TransferResult, TransferredScratchpad, WriteError, WriteResult, MAX_AGENT_MESSAGE_BYTES,
-    MAX_PENDING_AGENT_MESSAGES, MAX_PENDING_AGENT_MESSAGE_BYTES, MAX_PENDING_MESSAGES_PER_PROJECT,
-    MAX_PENDING_MESSAGES_PER_RECIPIENT,
+    SeedTemplate, SessionActivity, SetWhenIdleOutcome, StoredDiagram, StoredLease,
+    StoredScratchpad, StoredTemplate, StoredTimer, StoredTodo, TemplateRepo, TemplateSummary,
+    TemplateView, TemplateWriteResult, Templates, TimerRepo, TimerScheduler, TimerStatus,
+    TimerView, Timers, TodoCompletion, TodoCompletionAtomicResult, TodoCompletionCompareResult,
+    TodoCompletionContext, TodoCompletionDecision, TodoCompletionIntent, TodoCompletionKey,
+    TodoCompletionNotice, TodoCompletionNoticeOutcome, TodoCompletionOccurrence,
+    TodoCompletionOutcome, TodoDoc, TodoError, TodoLockReleaser, TodoRepo, TodoStatus, TodoSummary,
+    TodoView, TodoWriteResult, Todos, TransferResult, TransferredScratchpad, WriteError,
+    WriteResult, MAX_AGENT_MESSAGE_BYTES, MAX_PENDING_AGENT_MESSAGES,
+    MAX_PENDING_AGENT_MESSAGE_BYTES, MAX_PENDING_MESSAGES_PER_PROJECT,
+    MAX_PENDING_MESSAGES_PER_RECIPIENT, MAX_SESSION_DOCUMENTS_PER_PROCESS,
 };
 pub use debounce::Debouncer;
 pub use events::{DomainEvent, EventBus};
@@ -125,7 +126,10 @@ pub use notify::{
     AttentionSnapshot, NoopNotifier, Notification, NotificationReactor, Notifier, NotifierStatus,
     Presence, ProcessAttention,
 };
-pub use orchestration::{AgentNode, AgentSignal, LineageEdge, OrchestrationSnapshot};
+pub use orchestration::{
+    AgentNode, AgentSignal, LineageEdge, OrchestrationSnapshot, SessionScratchpad, SessionTodo,
+    SessionWork,
+};
 pub use orphans::{OrphanInfo, OrphanReport};
 pub use ports::{
     Clock, CompositeLockReleaser, ExitFuture, ExitStatus, LockReleaser, NoopLockReleaser,

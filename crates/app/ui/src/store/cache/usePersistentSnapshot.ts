@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type CacheKey, readSnapshot, writeSnapshot } from "@/store/cache/persistentCache";
+import { useLatestRef } from "@/store/useLatestRef";
 
 // A fetcher may emit a fast partial value before resolving its authoritative one — e.g. the
 // agent picker lists tools immediately, then fills in `--version` detection. Snapshots that
@@ -37,10 +38,8 @@ export function usePersistentSnapshot<T>(
   const [value, setValue] = useState<T | null>(null);
   // Hold the latest fetcher/options in refs so the mount effect does not re-run (and refetch)
   // when a caller passes a fresh closure each render.
-  const fetcherRef = useRef(fetcher);
-  fetcherRef.current = fetcher;
-  const errorRef = useRef(options?.onError);
-  errorRef.current = options?.onError;
+  const fetcherRef = useLatestRef(fetcher);
+  const errorRef = useLatestRef(options?.onError);
   const revalidateOnMount = options?.revalidateOnMount ?? true;
   // Two revalidations can overlap (a burst of domain events, or onResync racing one), and their
   // fetches can settle out of order. Only the most recently started request may still apply its
@@ -65,7 +64,7 @@ export function usePersistentSnapshot<T>(
         if (generation === latest.current) errorRef.current?.(reason);
       },
     );
-  }, [key]);
+  }, [key, fetcherRef, errorRef]);
 
   useEffect(() => {
     let cancelled = false;

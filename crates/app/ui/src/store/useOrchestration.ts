@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import { onDomainEvent, orchestrationSnapshot } from "@/api";
+import { failed, loading, ready, type Loadable } from "@/store/loadable";
 import { buildOrchestrationTree, type OrchestrationTreeNode } from "@/store/orchestrationTree";
 import { useReconcile } from "@/store/useReconcile";
 import type {
@@ -34,7 +35,8 @@ const SNAPSHOT_EVENTS: ReadonlySet<DomainEvent["type"]> = new Set([
   "TimerResumed",
 ]);
 
-export interface OrchestrationStore {
+/** Everything the orchestration surface renders for one project, as one read. */
+export interface OrchestrationReadModel {
   tree: OrchestrationTreeNode[];
   /** The flat agent list (registry order) — the tree's source, kept for id→label lookups. */
   agents: AgentNode[];
@@ -46,41 +48,50 @@ export interface OrchestrationStore {
   timers: TimerView[];
   /** Recorded agent-to-agent exchanges in the project, oldest first. */
   messages: AgentMessageRecord[];
+}
+
+export interface OrchestrationStore {
+  /** The project's read model: loading until its first snapshot lands, then ready and kept live. */
+  snapshot: Loadable<OrchestrationReadModel>;
+  /** A re-read that failed while a snapshot is showing; cleared by the next successful read. */
   error: string | null;
   refresh: () => void;
 }
 
-type Snapshot = Omit<OrchestrationStore, "error" | "refresh"> & { forProject: number | null };
+/** A read model and the project it was read for, so staleness is derivable rather than reset. */
+interface Held {
+  forProject: number;
+  model: OrchestrationReadModel;
+}
 
-const EMPTY: Snapshot = {
-  forProject: null,
-  tree: [],
-  agents: [],
-  todos: [],
-  scratchpads: [],
-  diagrams: [],
-  timers: [],
-  messages: [],
-};
+/** Why a read failed, and the project it was read for. */
+interface Failure {
+  forProject: number;
+  reason: string;
+}
 
 // The orchestration read model for one project — the agent tree plus the coordination state the
 // panels render (todos, scratchpad summaries). Seeds from the snapshot, then re-reads it when a
 // process-lifecycle, agent-activity, todo, or scratchpad event signals a change. Re-reads are
-// coalesced to one per animation frame, so a chatty run never thrashes the surface (CLAUDE.md §6).
-// Holds no business logic — the tree nesting lives in the pure `buildOrchestrationTree`. A null
-// project clears everything.
+// coalesced to one per animation frame, so a chatty run never thrashes the surface. Holds no
+// business logic — the tree nesting lives in the pure `buildOrchestrationTree`. Nothing is shown
+// until this project's own snapshot lands, so an unread board is never mistaken for an empty one.
 export function useOrchestration(project: number | null): OrchestrationStore {
-  const [snapshot, setSnapshot] = useState(EMPTY);
-  const [error, setError] = useState<string | null>(null);
+  const [held, setHeld] = useState<Held | null>(null);
+  const [failure, setFailure] = useState<Failure | null>(null);
 
-  const fail = useCallback((reason: unknown) => setError(String(reason)), []);
+  // Bound to the project the read was issued for, so a rejection that arrives after the user has
+  // switched projects cannot be reported against the project they are now looking at.
+  const failFor = useCallback(
+    (forProject: number) => (reason: unknown) => setFailure({ forProject, reason: String(reason) }),
+    [],
+  );
 
   const refresh = useCallback(() => {
     if (project == null) return;
     orchestrationSnapshot(project)
-      .then((snap) =>
-        setSnapshot({
-          forProject: project,
+      .then((snap) => {
+        const model: OrchestrationReadModel = {
           tree: buildOrchestrationTree(snap.agents),
           agents: snap.agents,
           todos: snap.todos,
@@ -88,10 +99,17 @@ export function useOrchestration(project: number | null): OrchestrationStore {
           diagrams: snap.diagrams,
           timers: snap.timers,
           messages: snap.messages,
-        }),
-      )
-      .catch(fail);
-  }, [project, fail]);
+        };
+        // Committing a whole read model is the expensive render on this surface, so it yields to
+        // whatever urgent work (a keystroke, a view switch) is in flight. The healed read clears
+        // the failure in the same transition, so fresh data is never painted beside stale news.
+        startTransition(() => {
+          setHeld({ forProject: project, model });
+          setFailure(null);
+        });
+      })
+      .catch(failFor(project));
+  }, [project, failFor]);
 
   useEffect(() => {
     if (project == null) return;
@@ -122,32 +140,32 @@ export function useOrchestration(project: number | null): OrchestrationStore {
         unlisten = stop;
         refresh();
       })
-      .catch(fail);
+      .catch(failFor(project));
 
     return () => {
       cancelled = true;
       unlisten?.();
       if (frame != null) cancelAnimationFrame(frame);
     };
-  }, [project, refresh, fail]);
+  }, [project, refresh, failFor]);
 
   // Re-read on a backend resync signal or window focus, so a dropped coordination or lifecycle
   // delta never leaves the orchestration board stale. A no-op while no project is selected.
   useReconcile(refresh);
 
-  // A snapshot captured for another project (or before the first load) is stale: surface EMPTY
-  // until this project's own data arrives, so switching projects never flashes the previous tree
-  // and a null project shows nothing — deriving staleness here means no effect resets state.
-  const view = snapshot.forProject === project ? snapshot : EMPTY;
-  return {
-    tree: view.tree,
-    agents: view.agents,
-    todos: view.todos,
-    scratchpads: view.scratchpads,
-    diagrams: view.diagrams,
-    timers: view.timers,
-    messages: view.messages,
-    error,
-    refresh,
-  };
+  // A model or a failure captured for another project (or before the first read answered) is not
+  // this project's news: deriving that here means switching projects never flashes the previous
+  // board or its complaint, and no effect has to reset state.
+  const model = held?.forProject === project ? held.model : null;
+  const reason = failure?.forProject === project ? failure.reason : null;
+
+  // Where a read failure surfaces depends on whether there is anything to keep on screen: beside a
+  // held model it is a re-read that failed, and with nothing held it is the phase itself.
+  const snapshot = useMemo<Loadable<OrchestrationReadModel>>(() => {
+    if (model != null) return ready(model);
+    if (reason != null) return failed(reason);
+    return loading();
+  }, [model, reason]);
+
+  return { snapshot, error: model != null ? reason : null, refresh };
 }

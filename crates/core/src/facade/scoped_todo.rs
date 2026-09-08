@@ -13,7 +13,9 @@
 
 use super::scoped::ScopedFacade;
 use super::todo::{map_comment, TodoCreation};
-use crate::coordination::{Comment, CommentAuthor, ScratchpadLink, TodoDoc, TodoSummary, TodoView};
+use crate::coordination::{
+    AccessKind, Comment, CommentAuthor, ScratchpadLink, TodoDoc, TodoSummary, TodoView,
+};
 use crate::events::DomainEvent;
 use crate::facade::CoordinationError;
 use crate::identity::Origin;
@@ -32,7 +34,9 @@ impl ScopedFacade<'_> {
     ) -> Result<TodoCreation, CoordinationError> {
         let project = self.coordination_scope()?;
         let scratchpad = self.resolve_scratchpad(project, scratchpad)?;
-        self.inner.create_todo(project, doc, scratchpad)
+        let created = self.inner.create_todo(project, doc, scratchpad)?;
+        self.note_todo(created.view.id, AccessKind::Worked);
+        Ok(created)
     }
 
     /// Every todo in the session's effective project, as one-line summaries.
@@ -44,10 +48,13 @@ impl ScopedFacade<'_> {
     /// The todo `id` in the session's effective project, or [`CoordinationError::UnknownTodo`].
     pub fn todo_get(&self, id: TodoId) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner
+        let view = self
+            .inner
             .todos
             .get(project, id)?
-            .ok_or(CoordinationError::UnknownTodo)
+            .ok_or(CoordinationError::UnknownTodo)?;
+        self.note_todo(view.id, AccessKind::Loaded);
+        Ok(view)
     }
 
     /// Replaces the document of todo `id` with `doc` in the session's effective project,
@@ -64,15 +71,20 @@ impl ScopedFacade<'_> {
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope()?;
         let scratchpad = scratchpad.try_map(|name| self.scratchpad_id(project, &name))?;
-        self.inner
-            .todo_update_in(project, id, doc, scratchpad, expected)
+        let view = self
+            .inner
+            .todo_update_in(project, id, doc, scratchpad, expected)?;
+        self.note_todo(view.id, AccessKind::Worked);
+        Ok(view)
     }
 
     /// Marks todo `id` done in the session's effective project — refused with
     /// [`CoordinationError::TodoBlocked`] while it has unmet blockers (the gate).
     pub fn todo_complete(&self, id: TodoId) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner.todo_complete_in(project, id)
+        let view = self.inner.todo_complete_in(project, id)?;
+        self.note_todo(view.id, AccessKind::Worked);
+        Ok(view)
     }
 
     /// Deletes todo `id` in the session's effective project, returning whether one was removed.
@@ -97,26 +109,30 @@ impl ScopedFacade<'_> {
     /// [`CoordinationError::UnknownTodo`] if there is none.
     pub fn todo_add_tag(&self, id: TodoId, tag: &str) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner.emit_todo(
+        let view = self.inner.emit_todo(
             project,
             self.inner
                 .todos
                 .add_tag(project, id, tag)?
                 .ok_or(CoordinationError::UnknownTodo),
-        )
+        )?;
+        self.note_todo(view.id, AccessKind::Worked);
+        Ok(view)
     }
 
     /// Removes `tag` from todo `id` in the session's effective project, returning the updated todo,
     /// or [`CoordinationError::UnknownTodo`] if there is none.
     pub fn todo_remove_tag(&self, id: TodoId, tag: &str) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner.emit_todo(
+        let view = self.inner.emit_todo(
             project,
             self.inner
                 .todos
                 .remove_tag(project, id, tag)?
                 .ok_or(CoordinationError::UnknownTodo),
-        )
+        )?;
+        self.note_todo(view.id, AccessKind::Worked);
+        Ok(view)
     }
 
     /// Replaces the blockers of todo `id` in the session's effective project, after validating each
@@ -127,7 +143,9 @@ impl ScopedFacade<'_> {
         blockers: Vec<TodoId>,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner.todo_set_blockers_in(project, id, blockers)
+        let view = self.inner.todo_set_blockers_in(project, id, blockers)?;
+        self.note_todo(view.id, AccessKind::Worked);
+        Ok(view)
     }
 
     /// Adds `blocker` to todo `id` in the session's effective project, after the same checks.
@@ -137,7 +155,9 @@ impl ScopedFacade<'_> {
         blocker: TodoId,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner.todo_add_blocker_in(project, id, blocker)
+        let view = self.inner.todo_add_blocker_in(project, id, blocker)?;
+        self.note_todo(view.id, AccessKind::Worked);
+        Ok(view)
     }
 
     /// Removes `blocker` from todo `id` in the session's effective project, returning the updated
@@ -148,7 +168,9 @@ impl ScopedFacade<'_> {
         blocker: TodoId,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner.todo_remove_blocker_in(project, id, blocker)
+        let view = self.inner.todo_remove_blocker_in(project, id, blocker)?;
+        self.note_todo(view.id, AccessKind::Worked);
+        Ok(view)
     }
 
     /// Moves todo `id` into project `to` for a scoped session (context C8 → C6). Authorized
@@ -172,13 +194,15 @@ impl ScopedFacade<'_> {
     pub fn todo_lock(&self, id: TodoId) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope()?;
         let owner = self.coordination_owner()?;
-        self.inner.emit_todo(
+        let view = self.inner.emit_todo(
             project,
             self.inner
                 .todos
                 .lock(project, id, owner)?
                 .ok_or(CoordinationError::UnknownTodo),
-        )
+        )?;
+        self.note_todo(view.id, AccessKind::Worked);
+        Ok(view)
     }
 
     /// Releases the lock on todo `id` in the session's effective project if held by the caller's
@@ -187,13 +211,15 @@ impl ScopedFacade<'_> {
     pub fn todo_unlock(&self, id: TodoId) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope()?;
         let owner = self.coordination_owner()?;
-        self.inner.emit_todo(
+        let view = self.inner.emit_todo(
             project,
             self.inner
                 .todos
                 .unlock(project, id, owner)?
                 .ok_or(CoordinationError::UnknownTodo),
-        )
+        )?;
+        self.note_todo(view.id, AccessKind::Worked);
+        Ok(view)
     }
 
     /// Adds a comment to todo `id` in the session's effective project, returning the updated todo and
@@ -213,6 +239,7 @@ impl ScopedFacade<'_> {
         self.inner
             .bus
             .publish(DomainEvent::TodoChanged { project, id });
+        self.note_todo(id, AccessKind::Worked);
         Ok(created)
     }
 
@@ -224,14 +251,16 @@ impl ScopedFacade<'_> {
         body: &str,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner.emit_todo(
+        let view = self.inner.emit_todo(
             project,
             map_comment(
                 self.inner
                     .todos
                     .comment_update(project, id, comment, body)?,
             ),
-        )
+        )?;
+        self.note_todo(view.id, AccessKind::Worked);
+        Ok(view)
     }
 
     /// Deletes comment `comment` of todo `id` in the session's effective project.
@@ -241,20 +270,25 @@ impl ScopedFacade<'_> {
         comment: u64,
     ) -> Result<TodoView, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner.emit_todo(
+        let view = self.inner.emit_todo(
             project,
             map_comment(self.inner.todos.comment_delete(project, id, comment)?),
-        )
+        )?;
+        self.note_todo(view.id, AccessKind::Worked);
+        Ok(view)
     }
 
     /// The comments on todo `id` in the session's effective project, or
     /// [`CoordinationError::UnknownTodo`] if there is none.
     pub fn todo_comment_list(&self, id: TodoId) -> Result<Vec<Comment>, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner
+        let comments = self
+            .inner
             .todos
             .comment_list(project, id)?
-            .ok_or(CoordinationError::UnknownTodo)
+            .ok_or(CoordinationError::UnknownTodo)?;
+        self.note_todo(id, AccessKind::Loaded);
+        Ok(comments)
     }
 
     /// The author to stamp on a new comment, resolved in the core from the caller's identity: a

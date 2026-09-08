@@ -186,6 +186,24 @@ describe("useTemplates", () => {
     expect(result.current.lists.scratchpad.project).toHaveLength(0);
   });
 
+  // Settings stays open across a project closing (the panel that shows this hook renders whichever
+  // project is currently active), so the project library and its default must not keep showing the
+  // just-closed project's data once nothing is open.
+  it("empties the project list and its default once the open project closes", async () => {
+    setup([summary(1, "daily", "scratchpad")], [summary(2, "sprint", "scratchpad")]);
+    const { result, rerender } = renderHook(({ project }) => useTemplates(project), {
+      initialProps: { project: OPEN_PROJECT as number | null },
+    });
+
+    await waitFor(() => expect(result.current.lists.scratchpad.project).toHaveLength(1));
+    expect(result.current.defaults.scratchpad).toBe(1);
+
+    rerender({ project: null });
+
+    expect(result.current.lists.scratchpad.project).toHaveLength(0);
+    expect(result.current.defaults).toEqual({ scratchpad: null, todo: null, pr: null });
+  });
+
   // A default belongs to a project, so with none open there is nothing to read — and the read that
   // asks anyway is refused, putting a load error over a panel whose only problem is that nothing is
   // open.

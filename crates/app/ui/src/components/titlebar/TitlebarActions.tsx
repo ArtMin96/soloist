@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { BranchCluster } from "@/components/deferredAppComponents";
+import { PaneErrorBoundary } from "@/components/PaneErrorBoundary";
 import { AttentionControl } from "@/components/titlebar/AttentionControl";
 import type { AttentionSnapshot, ProcessView } from "@/domain";
 
@@ -33,9 +34,11 @@ export function TitlebarActions({
   return (
     <>
       {project !== null && (
-        <Suspense fallback={null}>
-          <BranchCluster />
-        </Suspense>
+        <PaneErrorBoundary label="Branch switcher">
+          <Suspense fallback={null}>
+            <BranchCluster />
+          </Suspense>
+        </PaneErrorBoundary>
       )}
       <AttentionControl
         snapshot={snapshot}

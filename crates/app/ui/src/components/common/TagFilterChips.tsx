@@ -15,10 +15,11 @@ interface TagFilterChipsProps {
 // `aria-checked`/`role="radio"`, and type="multiple" would misrepresent an at-most-one selection as
 // an independent multi-select.
 export function TagFilterChips({ tags, active, onToggle }: TagFilterChipsProps) {
-  if (tags.length === 0) return null;
+  const visibleTags = active !== null && !tags.includes(active) ? [active, ...tags] : tags;
+  if (visibleTags.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-1" role="group" aria-label="Filter by tag">
-      {tags.map((tag) => {
+      {visibleTags.map((tag) => {
         const isActive = active === tag;
         return (
           <Toggle
@@ -27,7 +28,7 @@ export function TagFilterChips({ tags, active, onToggle }: TagFilterChipsProps) 
             pressed={isActive}
             onPressedChange={(pressed) => onToggle(pressed ? tag : null)}
             className={cn(
-              "h-auto min-w-0 rounded-md px-1.5 py-0.5 text-[0.6875rem] font-normal transition-colors duration-[var(--dur-fast)] ease-out-quint",
+              "type-label h-5 min-w-0 rounded-full px-2 font-medium transition-colors duration-[var(--dur-fast)] ease-out-quint",
               "focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-none",
               // Stacked rather than a single `data-[state=on]:` variant: the base `Toggle` primitive
               // carries its own unconditional `hover:bg-muted` and `aria-pressed:bg-muted`, each at the
@@ -36,7 +37,8 @@ export function TagFilterChips({ tags, active, onToggle }: TagFilterChipsProps) 
               // a pressed Radix `Toggle`) raises this rule's specificity above every base selector it
               // could otherwise tie with, so the selected fill always wins.
               "data-[state=on]:aria-pressed:bg-[var(--sidebar-sel-fill)] data-[state=on]:aria-pressed:text-foreground",
-              !isActive && "text-muted-foreground hover:bg-sidebar-accent",
+              !isActive &&
+                "text-secondary-label hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
             )}
           >
             {tag}

@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AutosaveStatus } from "@/components/editor/AutosaveStatus";
 import { LazyRichTextEditor } from "@/components/editor/LazyRichTextEditor";
 import { useAutosave } from "@/components/editor/useAutosave";
 import type { SaveOutcome } from "@/store/saveOutcome";
@@ -49,8 +50,6 @@ export function TemplateEditorBody({
     void navigator.clipboard?.writeText(bodyRef.current);
   };
 
-  const status = autosave.saving ? "Saving…" : autosave.dirty ? "Unsaved changes" : "Saved";
-
   return (
     <div className="flex h-full flex-col gap-2">
       <Input
@@ -78,13 +77,7 @@ export function TemplateEditorBody({
       </div>
 
       <footer className="flex items-center gap-3">
-        <span
-          className="text-[0.6875rem] text-muted-foreground"
-          aria-live="polite"
-          data-autosave-status
-        >
-          {status}
-        </span>
+        <AutosaveStatus saving={autosave.saving} dirty={autosave.dirty} />
         <div className="flex-1" />
         <Button variant="ghost" size="sm" onClick={copyMarkdown}>
           <Copy aria-hidden /> Copy Markdown

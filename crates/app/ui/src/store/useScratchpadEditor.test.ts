@@ -2,9 +2,11 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { scratchpadLink, scratchpadRead, scratchpadRename, scratchpadWrite } from "@/api";
-import { useScratchpadEditor } from "@/store/useScratchpadEditor";
+import { LoadStatus } from "@/store/loadable";
+import { useScratchpadEditor, type ScratchpadEditorStore } from "@/store/useScratchpadEditor";
 import type { SaveOutcome } from "@/store/saveOutcome";
 import { expectCopyLinkWritesCoreLink } from "@/test/copyLinkContract";
+import { holdRead } from "@/test/heldRead";
 import {
   expectCloseDiscardsInFlightRead,
   expectSupersededReadIsDiscarded,
@@ -31,12 +33,23 @@ const view = (name: string, revision = 3, body = "the plan"): ScratchpadView => 
   revision,
 });
 
+/** The body the store is showing, or null while it holds no document. */
+const bodyOf = (store: ScratchpadEditorStore) =>
+  store.document.status === LoadStatus.Ready ? store.document.value.body : null;
+
+/** What the store shows as open: the handle, the body it holds, and the guard the next write carries. */
+const snapshotOf = (store: ScratchpadEditorStore) => ({
+  identity: store.name,
+  content: bodyOf(store),
+  revision: store.baseRevision,
+});
+
 /** Opens `name` in a fresh editor hook, with the read resolved. */
 async function openedEditor(name: string) {
   vi.mocked(scratchpadRead).mockResolvedValue(view(name));
   const { result } = renderHook(() => useScratchpadEditor(7));
   act(() => result.current.open(name));
-  await waitFor(() => expect(result.current.initialBody).toBe("the plan"));
+  await waitFor(() => expect(bodyOf(result.current)).toBe("the plan"));
   return result;
 }
 
@@ -48,11 +61,7 @@ describe("useScratchpadEditor open", () => {
       useStore: () => useScratchpadEditor(7),
       readFn: vi.mocked(scratchpadRead),
       open: (store, target) => store.open(target.name),
-      snapshotOf: (store) => ({
-        identity: store.name,
-        content: store.initialBody,
-        revision: store.baseRevision,
-      }),
+      snapshotOf,
       snapshotIn: (target) => ({
         identity: target.name,
         content: target.body,
@@ -73,14 +82,59 @@ describe("useScratchpadEditor open", () => {
       readFn: vi.mocked(scratchpadRead),
       open: (store, target) => store.open(target.name),
       close: (store) => store.close(),
-      snapshotOf: (store) => ({
-        identity: store.name,
-        content: store.initialBody,
-        revision: store.baseRevision,
-      }),
+      snapshotOf,
       target: view("release-plan", 3),
       mountKeyOf: (store) => store.mountKey,
     }));
+
+  it("shows nothing of the scratchpad it left while the next one is still being read", async () => {
+    const result = await openedEditor("release-plan");
+    const settle = holdRead(vi.mocked(scratchpadRead));
+
+    act(() => result.current.open("research"));
+
+    expect(result.current.document.status).toBe(LoadStatus.Loading);
+
+    await act(async () => settle(view("research", 8, "the research notes")));
+    expect(bodyOf(result.current)).toBe("the research notes");
+  });
+});
+
+describe("useScratchpadEditor reload", () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it("keeps the open body on screen until the fresh read lands", async () => {
+    const result = await openedEditor("release-plan");
+    const settle = holdRead(vi.mocked(scratchpadRead));
+
+    act(() => result.current.reload());
+
+    expect(bodyOf(result.current)).toBe("the plan");
+
+    await act(async () => settle(view("release-plan", 4, "the plan, revised")));
+    expect(bodyOf(result.current)).toBe("the plan, revised");
+  });
+
+  it("has nothing to show when the first read is refused, and re-reads from loading", async () => {
+    vi.mocked(scratchpadRead).mockRejectedValueOnce("no such scratchpad");
+    const { result } = renderHook(() => useScratchpadEditor(7));
+
+    act(() => result.current.open("research"));
+
+    await waitFor(() =>
+      expect(result.current.document).toEqual({
+        status: LoadStatus.Failed,
+        error: "no such scratchpad",
+      }),
+    );
+
+    const settle = holdRead(vi.mocked(scratchpadRead));
+    act(() => result.current.reload());
+    expect(result.current.document.status).toBe(LoadStatus.Loading);
+
+    await act(async () => settle(view("research", 2, "the research notes")));
+    expect(bodyOf(result.current)).toBe("the research notes");
+  });
 });
 
 describe("useScratchpadEditor save", () => {
@@ -93,6 +147,19 @@ describe("useScratchpadEditor save", () => {
     await expect(result.current.save("edited")).resolves.toBe("saved");
     expect(result.current.conflict).toBeNull();
     expect(result.current.error).toBeNull();
+  });
+
+  it("shows the written text as the open document, without re-reading it", async () => {
+    const result = await openedEditor("release-plan");
+    vi.mocked(scratchpadWrite).mockResolvedValueOnce(view("release-plan", 4, "edited"));
+
+    await act(async () => {
+      await result.current.save("edited");
+    });
+
+    expect(bodyOf(result.current)).toBe("edited");
+    expect(result.current.baseRevision).toBe(4);
+    expect(scratchpadRead).toHaveBeenCalledTimes(1);
   });
 
   it("resolves to refused when a refused write reveals a moved-on revision", async () => {

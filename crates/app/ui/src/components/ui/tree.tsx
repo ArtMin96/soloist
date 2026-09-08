@@ -16,6 +16,8 @@ function Tree<T>({
   className,
   ...props
 }: React.ComponentProps<"div"> & { tree: TreeInstance<T> }) {
+  "use no memo"; // the tree instance is stable-identity but mutates internally, so the compiler
+  // must not cache its getter output across renders
   return (
     <div
       {...tree.getContainerProps()}
@@ -45,6 +47,8 @@ function TreeItem<T>({
   children,
   ...props
 }: React.ComponentProps<"div"> & { item: ItemInstance<T> }) {
+  "use no memo"; // the item instance is stable-identity but mutates internally, so the compiler
+  // must not cache its getter output across renders
   return (
     <div
       {...item.getProps()}
@@ -72,6 +76,8 @@ function TreeItem<T>({
  * names in a mixed list stay on one vertical line instead of stepping in and out.
  */
 function TreeItemChevron<T>({ item }: { item: ItemInstance<T> }) {
+  "use no memo"; // the item instance is stable-identity but mutates internally, so the compiler
+  // must not cache its getter output across renders
   if (!item.isFolder()) return <span className="w-3.5 shrink-0" aria-hidden />;
   return (
     <ChevronRightIcon

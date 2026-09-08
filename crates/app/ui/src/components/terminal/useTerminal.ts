@@ -63,6 +63,14 @@ export function useTerminal(process: ProcessView, visible = true) {
   // machinery rather than from the cells on screen, so an OSC 8 hyperlink that displays one thing
   // and points at another is reported by where it goes.
   const [linkTarget, setLinkTarget] = useState<string | null>(null);
+  // Switching away leaves the pointer wherever it was, so a link it was resting on never reports
+  // that it was left; without this the pane would come back showing a destination the pointer is
+  // no longer on. Tracked here, during render, so the clear lands the same render `visible` does.
+  const [wasVisible, setWasVisible] = useState(visible);
+  if (wasVisible !== visible) {
+    setWasVisible(visible);
+    if (!visible) setLinkTarget(null);
+  }
 
   // The latest visibility, read inside the attachment's byte handler so a hidden pool pane stops
   // scheduling per-frame flushes — and the VT parsing they drive — without re-creating the
@@ -314,13 +322,7 @@ export function useTerminal(process: ProcessView, visible = true) {
   // happened off-screen, and — when the setting allows — take keyboard focus so the user can type
   // immediately after switching.
   useEffect(() => {
-    if (!visible) {
-      // Switching away leaves the pointer wherever it was, so a link it was resting on never
-      // reports that it was left; without this the pane would come back showing a destination the
-      // pointer is no longer on.
-      setLinkTarget(null);
-      return;
-    }
+    if (!visible) return;
     // Drain what accrued while hidden — unless the bounded backlog overflowed, in which case the
     // drained bytes would start mid-stream (a gap): re-attach and replay the core's scrollback for a
     // coherent, current view instead.

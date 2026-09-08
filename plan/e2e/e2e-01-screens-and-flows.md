@@ -239,6 +239,132 @@ Surgical because no other spec writes a scratchpad, completes a todo, or creates
 paths are coordination-only. Each mutation reddened exactly one assertion; `git diff --stat crates/` showed
 none of the three files after restore.
 
+The todo-workspace walk (`specs/coordination/todo-workspace.spec.ts`) drives the board rows, the locked row's agent
+control, and the agent terminal header's session-work context against the same bound lead, whose coordination arm
+was extended to `todo_lock` / `todo_get` / `scratchpad_read` so "Current work" and "This session" are what the core
+recorded from real tool calls. Its first run caught the walk's own pretend assertion before it caught anything in
+the product: stopping the only process navigates the window to the start surface, so an "empty" read of the lead's
+header was a read of no pane at all and the clear-on-stop assertion passed vacuously — the mutation below stayed
+green until the read was made to report "no pane visible" as distinct from "nothing shown", and the walk re-opened
+the stopped lead's pane before asserting. Product-mutation pass, reverted byte-clean (`facade.rs` carries other
+uncommitted work, so it was restored from a byte copy and `cmp`-verified rather than checked out):
+
+| Mutation | Expected | Observed |
+|----------|----------|----------|
+| Drop `session_activity.clone()` from the `CompositeLockReleaser` in `Facade::new` (`crates/core/src/facade.rs`) — a closing process's per-run record is never forgotten | only "empties the lead's session context when the lead stops" fails | exactly that, once the read was honest: `the visible agent's session-work context never cleared; last read: {"currentTodos":[],"sessionScratchpads":[],"sessionTodos":[1,2,3]}` — the lock had released (current work empty) but the recorded todos still rendered under "This session". The walk's other assertions (row id/status/blocker counts, the lock's owner and process id, the header's current/session lists, both inbound navigations) held; the min-width one was red for its own unrelated reason in that run (the product defects the walk caught, fixed since) |
+
+Surgical because only this walk reads the session-work header, and nothing in any cleanup path depends on the
+record being forgotten. One walk point was **pulled as harness-blocked**: keyboard traversal of a row (Tab from the
+trigger to the agent control, each with a visible ring). The embedded WebDriver plugin dispatches key actions as
+synthesized `KeyboardEvent`s on the active element (`tauri-plugin-wdio-webdriver` `platform/executor.rs`), and an
+untrusted keydown never runs the engine's default action, so a Tab cannot move focus and `:focus-visible` cannot be
+produced — observed: after `keys("Tab")` focus was still on the trigger. That the two controls are separate,
+non-nested focusables stays a jsdom question (`TodoItem.test.tsx`). The minimum-width assertion is scoped to the board's
+own surface (`[data-todo-toolbar]` and the rows' scroll container): the orchestration pane's six-segment view switch
+overflowing a 184px pane (`scrollWidth 485 / clientWidth 184` at 720px with the git rail open) is a pre-existing limit
+of a control this feature did not touch, recorded as a follow-up rather than asserted here.
+
+**Reconciled when the board became master–detail.** The row's inline expansion was replaced by a detail panel
+sliding in beside the list, which moved Complete, the refusal alert, the comment thread and a todo's provenance
+out of the `<li data-todo-id>` the screen object read everything through. Four points are worth keeping:
+
+- **Panel membership proves nothing.** Both panels stay mounted for the whole movement, so
+  `[data-todo-panel="detail"]` existing is *always* true and an assertion on it would be a pretend test. The
+  viewport's `data-todo-route` is the only honest read of which panel the user is on, and `[data-todo-detail]`
+  now carries the open todo's id, so identity is a named handle rather than a heading's text.
+- **The board is read atomically.** A route change swaps both panels' `inert` and moves focus in one commit;
+  `todoBoard.view()` takes route, open todo and `document.activeElement` in a single `browser.execute` for the
+  same reason `sidebar.rows()` does — separate reads can catch a state the app never actually showed.
+- **`focusedTodoId`/`waitForFocusedTodo` moved from `orchestrationPane` to `todoBoard`.** A todo row's focus is
+  the board's fact, and `[data-todo-id]` may not be a selector in two screens.
+- **Row-level expansion was deleted, not reworded.** `isExpanded(...) === true` no longer describes anything a
+  user can do; it is replaced by "the detail panel is open on that todo, with focus on Back".
+
+**The reconciliation found a defect no headless test could.** `TodoPanels` dropped the panel it had retained for
+the slide on `transitionend`, guarded by `event.propertyName === "transform"` — but Tailwind v4's
+`-translate-x-full` compiles to the `translate` property, and `transition-transform` expands to
+`transition-property: transform, translate, scale, rotate`. Measured in the real window
+(`prefers-reduced-motion: false`, `transitionDuration: 0.3s`), the track's events were
+`["start translate self=true", …]`: the guard could never match, `onSettled` never fired, and the detail panel
+stayed mounted off-screen indefinitely. jsdom fires no transitions at all, so `TodoBoard.test.tsx` was green
+throughout. Fixed in the component; the identical guard still sits in `common/SlidingPanels.tsx`, whose unit
+test manufactures the event with `fireEvent.transitionEnd(track, { propertyName: "transform" })` and is
+therefore green against a path the browser cannot take — it must be fixed before the board is rewired onto it.
+
+| Mutation | Expected | Observed |
+|----------|----------|----------|
+| None needed for the panel drop — the assertion was written against the unfixed product | only "hands the pane to a card's detail panel, and returns to the row it came from" fails, at the drop | exactly that, twice: `the detail panel was never dropped after returning to the list; last read: {"backFocused":false,"detail":{…,"title":"Publish the release notes"},"focusedRow":2,"route":"list"}`. The route had changed and focus had returned, so the failure is pinned to the unmount alone; the walk's other eight assertions and all three `coordination-panels` assertions held. Green once the guard accepted `translate` too (`SETTLE_PROPERTIES = new Set(["transform", "translate"])`, `event.target === event.currentTarget` intact) — a real before/after rather than a synthetic mutation |
+| Drop the `scratchpad: Some(…)` link the lead makes over the wire (`fixtures/lead-agent/src/coordination.rs`) — the todo derives from no document | only the detail panel's provenance assertion fails | exactly that: `Expected: "release-readiness", Received: "not-derived-from-a-scratchpad"` — the field fell back to its empty state, so the name can only have come from the core carrying the agent's link |
+| Delete the `pendingFocusRef.current = { panel: "detail", … }` assignment in `openDetail` (`TodoBoard.tsx`) — opening a panel no longer moves focus into it | only the two `backFocused` assertions fail | exactly that: `Expected: true, Received: false` in "hands the pane to a card's detail panel…" and in "returns from a current-work item…". The other seven held, including both minimum-width readings |
+| Point `back()`'s focus target at a handle that matches nothing (`TodoBoard.tsx`) — returning parks focus on the panel instead of the row | only `waitForFocusedRow` fails | exactly that: `focus never landed on todo 2; last focused todo: none` — `focusPanel` fell back to the panel root, so focus moved but not onto a row. Eight of nine passed, `backFocused` among them: the two focus moves are proven independent |
+
+Both `TodoBoard.tsx` mutations were restored by byte copy and verified with `sha256sum -c` (never `git checkout --`:
+nothing in that refactor is committed, so a checkout would revert to HEAD and destroy it). The restore is guarded —
+it re-checks that the file still matches the *mutated* hash before overwriting, so a concurrent edit is refused
+rather than clobbered.
+
+**The first mutation also caught a fragility in the walk itself.** With the detail panel left open by the failing
+assertion, the *next* test could not click a row's agent control (`element ("[data-todo-agent]") still not
+clickable after 10000ms`) and three tests cascaded — not because of the product, but because the list panel is
+`inert` and off the track while the detail shows. `todoBoard.showList()` now precedes anything that *acts* on a
+row, the same discipline `open()` already had; reads need no such thing, since the off-screen panel stays mounted
+and live. Re-running the later mutations confirmed the cascade was gone: each reddened only its own assertions.
+
+**Reconciled again when the scratchpad surface became the same board.** The roster listbox and the editor pane
+beside it were replaced by the to-do board's twin — a toolbar, cards, and a detail panel that slides in — so
+`ScratchpadPanel` is `ScratchpadBoard`, shaped like `TodoBoard` and taking the same one-pass snapshot for the same
+reason. Both boards wear one kit now, so four of `TodoBoard`'s handles were renamed with it (`data-panel-route`,
+`data-detail-back`, `data-card-trigger`, `data-board-toolbar`); its behavioural contract did not move. Three
+things are worth keeping:
+
+- **The detail panel opens in *reading*, and that moved a step of the conflict walk.** A document merely being
+  read follows the revision the board sees — the pane re-reads it under the reader, so a note an agent is writing
+  into stays current — which makes "open it and wait" exactly how *not* to hold a stale revision. The editor is
+  therefore started before the lead's concurrent write rather than after it, since only an open editor holds the
+  revision the next save is guarded by. No assertion changed, and the first mutation below still pins the one
+  that matters.
+- **Reading mounts the same editor as writing**, held read-only, so `[data-editor="rich-text"]` is on screen in
+  both modes and waiting for it would have let `startEdit` return before anything was editable. It waits on the
+  Done control instead, which exists only while a document is being written to.
+- **A board's landmark has to name its own subject.** `[data-board-toolbar]` and `[data-panel-route]` belong to
+  both boards now, so `waitForBoard` waits on the search field's accessible name (`aria/Search scratchpads`,
+  webdriver.io's ✅ accessible-name strategy). A shared structural handle would settle on whichever board happened
+  to be up and report a view switch that had not happened.
+
+**And it found a product regression the boards' own tests could not see** — the same shape as the last one, one
+surface up. `OrchestrationPane` switches to the view an inbound activation names, and that switch had moved from
+an effect to a render-time state adjustment (`ae4c570`, the React-Compiler pass). The two are not equivalent at
+mount: an effect runs after the first commit, while `useState(focus)` seeds the guard *with the arriving
+activation*, so the adjustment's `if` is false on the one render that needed it. The pane an inbound navigation
+lands in is always a fresh mount — `openOrchestrationItem` deselects the process and names the target in a single
+commit, unmounting the terminal and mounting the pane together — so **both** halves of the session bar put the
+reader on the agents tree instead of the item they activated. Two of this walk's assertions were red for it before
+any part of the reconciliation was in question, one of them in a test the reconciliation never touched. Fixed by
+seeding the view from the activation (`useState<View>(focus?.view ?? DEFAULT_VIEW)`), which answers the mount case
+with no effect and leaves the render-time adjustment to handle a later activation. `OrchestrationPane.test.tsx`
+had no `focus` test at all; it now covers the mount case, watched red against the unfixed pane
+(`expected [] to have a length of 1`, the pane rendering "No agents in this project yet") and green after.
+
+| Mutation | Expected | Observed |
+|----------|----------|----------|
+| Drop `onOpen` from `ScratchpadBoard`'s `useMasterDetail` options — the detail panel opens without reading the document | only the scratchpad-conflict assertion fails | exactly that: `element ("aria/Edit") still not clickable after 30000ms` — the header's Edit control is disabled until the body read lands, so an unread document can never be edited. `coordination-panels`' other two and **all 19 other spec files** passed, `todo-workspace` 9/9 among them: its scratchpad navigation asserts the panel opened and where focus went, neither of which needs the document |
+| Delete the `pendingFocusRef.current = { panel: "detail", … }` write in `useMasterDetail.open` — opening a panel no longer moves focus into it | only the `backFocused` assertions fail | exactly that, and now **three** of them rather than the two the to-do board alone had: `Expected: true, Received: false` in "hands the pane to a card's detail panel…", "returns from a current-work item to that todo…" and "returns from a this-session item to that scratchpad…". Both boards share the hook, so one deleted line reddens both surfaces' inbound focus and nothing else — `todo-workspace`'s other six and all 19 other spec files passed |
+
+Both mutations were restored by byte copy and verified with `sha256sum` against the pre-mutation digest, and each
+restore re-checks the file still matches the *mutated* hash first, so a concurrent edit is refused rather than
+clobbered. `git checkout --` is not usable here: neither file is committed, so it would revert to HEAD and destroy
+the refactor.
+
+**Harness finding (fixed here, not a product defect): a read that never waited for the panel to finish rendering.**
+`todoBoard.detailText` took one `getText()` straight after the click, and the comment walk had been winning that
+race by luck. It stopped winning once rendered Markdown began mounting a pass after the click and standing in for
+itself until its renderer seeds — the read then returned
+`…DescriptionLoading Review the changelog bodyComments1CCodex`, with the author present and the body still a
+placeholder. The remedy is the app's own accessibility contract rather than a timeout: every stand-in marks its box
+`aria-busy`, labelled or not (a thread of ten comment bodies must not announce ten waits), so the read now settles
+on there being no `[aria-busy="true"]` left inside `[data-todo-detail]` and only then reads. That is a statement the
+panel makes about itself, so it cannot drift out of step with however long the prose happens to take.
+
 The addressed-agent-messaging walk (`specs/orchestration/agent-messaging.spec.ts`) reuses the bound lead
 fixture with two spawned fixture workers. Its source proof contrasts the wire default with an explicit
 opt-out: the primary serializes `include_agent_instructions: true`, which the protocol omits on the wire,

@@ -13,7 +13,7 @@
 use super::scoped::ScopedFacade;
 use super::template::Seeded;
 use super::Facade;
-use crate::coordination::{RenameError, ScratchpadSummary, ScratchpadView, WriteError};
+use crate::coordination::{AccessKind, RenameError, ScratchpadSummary, ScratchpadView, WriteError};
 use crate::events::DomainEvent;
 use crate::facade::CoordinationError;
 use crate::ids::ProjectId;
@@ -203,14 +203,18 @@ impl ScopedFacade<'_> {
         expected: Option<u64>,
     ) -> Result<ScratchpadWrite, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner.write_scratchpad(project, name, body, expected)
+        let written = self.inner.write_scratchpad(project, name, body, expected)?;
+        self.note_scratchpad(written.view.id, AccessKind::Worked);
+        Ok(written)
     }
 
     /// The scratchpad `name` in the session's effective project, or
     /// [`CoordinationError::UnknownScratchpad`] if there is none.
     pub fn scratchpad_read(&self, name: &str) -> Result<ScratchpadView, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner.scratchpad_read_in(project, name)
+        let view = self.inner.scratchpad_read_in(project, name)?;
+        self.note_scratchpad(view.id, AccessKind::Loaded);
+        Ok(view)
     }
 
     /// Every scratchpad in the session's effective project as a one-line summary.
@@ -227,7 +231,9 @@ impl ScopedFacade<'_> {
         to: &str,
     ) -> Result<ScratchpadView, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner.scratchpad_rename_in(project, from, to)
+        let view = self.inner.scratchpad_rename_in(project, from, to)?;
+        self.note_scratchpad(view.id, AccessKind::Worked);
+        Ok(view)
     }
 
     /// Moves the scratchpad `name` into project `to` for a scoped session (context C8 → C6).
@@ -257,13 +263,15 @@ impl ScopedFacade<'_> {
         tags: &[String],
     ) -> Result<ScratchpadView, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner.emit_scratchpad(
+        let view = self.inner.emit_scratchpad(
             project,
             self.inner
                 .scratchpads
                 .add_tags(project, name, tags)?
                 .ok_or(CoordinationError::UnknownScratchpad),
-        )
+        )?;
+        self.note_scratchpad(view.id, AccessKind::Worked);
+        Ok(view)
     }
 
     /// Removes `tags` from the scratchpad `name` in the session's effective project, returning the
@@ -274,13 +282,15 @@ impl ScopedFacade<'_> {
         tags: &[String],
     ) -> Result<ScratchpadView, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner.emit_scratchpad(
+        let view = self.inner.emit_scratchpad(
             project,
             self.inner
                 .scratchpads
                 .remove_tags(project, name, tags)?
                 .ok_or(CoordinationError::UnknownScratchpad),
-        )
+        )?;
+        self.note_scratchpad(view.id, AccessKind::Worked);
+        Ok(view)
     }
 
     /// The distinct tags used across the session's effective project's scratchpads, sorted.
@@ -298,13 +308,15 @@ impl ScopedFacade<'_> {
         archived: bool,
     ) -> Result<ScratchpadView, CoordinationError> {
         let project = self.coordination_scope()?;
-        self.inner.emit_scratchpad(
+        let view = self.inner.emit_scratchpad(
             project,
             self.inner
                 .scratchpads
                 .set_archived(project, name, archived)?
                 .ok_or(CoordinationError::UnknownScratchpad),
-        )
+        )?;
+        self.note_scratchpad(view.id, AccessKind::Worked);
+        Ok(view)
     }
 
     /// Deletes the scratchpad `name` in the session's effective project, returning whether one was

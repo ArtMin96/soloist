@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
+import { useLatestRef } from "@/store/useLatestRef";
 
 // Run an async `load` exactly once on mount and hand its result to `onLoaded`, guarded so a
 // result that arrives after unmount is dropped. This is the shared shape behind every "load the
@@ -10,13 +11,11 @@ export function useLoadOnce<T>(
   onLoaded: (value: T) => void,
   onError?: (reason: unknown) => void,
 ): void {
-  const loadRef = useRef(load);
-  loadRef.current = load;
-  const onLoadedRef = useRef(onLoaded);
-  onLoadedRef.current = onLoaded;
-  const onErrorRef = useRef(onError);
-  onErrorRef.current = onError;
+  const loadRef = useLatestRef(load);
+  const onLoadedRef = useLatestRef(onLoaded);
+  const onErrorRef = useLatestRef(onError);
 
+  // The refs are stable across renders (`useLatestRef`), so listing them still runs this once per mount.
   useEffect(() => {
     let cancelled = false;
     loadRef.current().then(
@@ -30,5 +29,5 @@ export function useLoadOnce<T>(
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadRef, onLoadedRef, onErrorRef]);
 }

@@ -97,4 +97,23 @@ describe("DocumentRoster", () => {
     expect(backend.getAttribute("aria-pressed")).toBe("false");
     expect(screen.getByRole("listbox", { name: "Docs" }).textContent).toContain("ui");
   });
+
+  it("keeps the search box live and settles the list to the matching row, even over a large roster", () => {
+    // The visible rows derive from a deferred copy of `query` (see DocumentRoster.tsx), so the
+    // search box itself must never wait on it — this is the surface that would visibly lag if the
+    // input were bound to anything but the live keystroke.
+    const many = Array.from({ length: 3000 }, (_, i) => doc(i, `doc-item-${i}`));
+    renderRoster(many);
+
+    const input = screen.getByRole("searchbox", { name: "Search docs" }) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "item-1234" } });
+
+    // The typed text lands synchronously, regardless of how large the roster behind it is.
+    expect(input.value).toBe("item-1234");
+    // The deferred derivation settles to exactly the matching row — never the unfiltered 3000, and
+    // never a mix of the two.
+    const options = within(screen.getByRole("listbox", { name: "Docs" })).getAllByRole("option");
+    expect(options).toHaveLength(1);
+    expect(options[0].getAttribute("data-scratchpad-name")).toBe("doc-item-1234");
+  });
 });
